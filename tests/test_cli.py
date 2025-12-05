@@ -1305,3 +1305,292 @@ checksum:
 
         assert result.exit_code == 1
         assert "Permission denied" in result.output
+
+
+class TestCreateSignChecksum:
+    """Tests for create --sign checksum fix (Issue 1)."""
+
+    def test_create_with_sign_produces_valid_checksum(self, tmp_path, monkeypatch):
+        """Checksum should be valid immediately after create --sign.
+
+        This tests the fix for Issue 1: When creating a dossier with --sign,
+        the checksum must be calculated AFTER frontmatter normalization to
+        ensure it matches what will be verified later.
+        """
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        # Generate key first
+        runner.invoke(main, ["generate-keys"])
+
+        # Create input file WITH trailing newline (this is the common case that
+        # triggers the bug - frontmatter strips trailing newlines)
+        input_file = tmp_path / "test.md"
+        input_file.write_text("# Test content\n\nThis is body content.\n")
+
+        output_file = tmp_path / "test.ds.md"
+
+        # Create and sign dossier
+        result = runner.invoke(
+            main,
+            [
+                "create",
+                str(input_file),
+                "--name",
+                "test",
+                "--title",
+                "Test",
+                "--objective",
+                "Test objective",
+                "--author",
+                "Test Author",
+                "--sign",
+                "--signed-by",
+                "Test Author",
+                "-o",
+                str(output_file),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert output_file.exists()
+
+        # Verify should pass immediately - this was failing before the fix
+        verify_result = runner.invoke(main, ["verify", str(output_file)])
+
+        assert verify_result.exit_code == 0
+        assert "Checksum:  valid" in verify_result.output
+        assert "Signature: valid" in verify_result.output
+
+    def test_create_with_sign_checksum_valid_json(self, tmp_path, monkeypatch):
+        """Same as above but verify using JSON output."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        runner.invoke(main, ["generate-keys"])
+
+        input_file = tmp_path / "test.md"
+        input_file.write_text("Body with trailing newline\n")
+        output_file = tmp_path / "test.ds.md"
+
+        runner.invoke(
+            main,
+            [
+                "create",
+                str(input_file),
+                "--name",
+                "test",
+                "--title",
+                "Test",
+                "--objective",
+                "Testing the checksum validation",
+                "--author",
+                "Author",
+                "--sign",
+                "--signed-by",
+                "Author",
+                "-o",
+                str(output_file),
+            ],
+        )
+
+        verify_result = runner.invoke(main, ["verify", str(output_file), "--json"])
+
+        assert verify_result.exit_code == 0
+        data = json.loads(verify_result.output)
+        assert data["valid"] is True
+        assert data["checksum"]["status"] == "valid"
+        assert data["signature"]["status"] == "valid"
+
+
+class TestPublishPropagationNote:
+    """Tests for publish propagation note (Issue 2)."""
+
+    @respx.mock
+    def test_publish_shows_propagation_note(self, tmp_path, monkeypatch):
+        """Publish should show a note about CDN propagation delay."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+
+        # Create credentials
+        dossier_dir = tmp_path / ".dossier"
+        dossier_dir.mkdir()
+        (dossier_dir / "credentials").write_text('{"token": "my-token", "username": "alice", "orgs": []}')
+
+        # Create valid dossier
+        dossier_file = tmp_path / "deploy.ds.md"
+        dossier_file.write_text("""---
+schema_version: "1.0.0"
+title: Deploy
+version: "1.0.0"
+status: draft
+objective: Deploy the app
+name: deploy
+authors:
+  - name: Alice
+checksum:
+  algorithm: sha256
+  hash: 6bb135eeeff94e0e72479e59796ec87ede1be5f425946c882691498957c21568
+---
+
+# Deploy
+""")
+
+        respx.post("https://registry.test/api/v1/dossiers").mock(
+            return_value=Response(201, json={"name": "myorg/deploy", "version": "1.0.0"})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["publish", str(dossier_file), "--namespace", "myorg/tools"])
+
+        assert result.exit_code == 0
+        assert "Published" in result.output
+        # Check for the propagation note
+        assert "may take" in result.output.lower()
+        assert "dossier list" in result.output
+
+
+class TestSignedByWarning:
+    """Tests for signed_by mismatch warning (Issue 3)."""
+
+    def test_create_sign_warns_when_signed_by_differs_from_author(self, tmp_path, monkeypatch):
+        """Create --sign should warn when --signed-by doesn't match --author."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        runner.invoke(main, ["generate-keys"])
+
+        input_file = tmp_path / "test.md"
+        input_file.write_text("Body content")
+        output_file = tmp_path / "test.ds.md"
+
+        result = runner.invoke(
+            main,
+            [
+                "create",
+                str(input_file),
+                "--name",
+                "test",
+                "--title",
+                "Test",
+                "--objective",
+                "Testing",
+                "--author",
+                "Real Author",
+                "--sign",
+                "--signed-by",
+                "Different Person",
+                "-o",
+                str(output_file),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Warning" in result.output
+        assert "Different Person" in result.output
+        assert "does not match any author" in result.output
+        assert "self-reported" in result.output.lower()
+
+    def test_create_sign_no_warning_when_signed_by_matches_author(self, tmp_path, monkeypatch):
+        """Create --sign should NOT warn when --signed-by matches --author."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        runner.invoke(main, ["generate-keys"])
+
+        input_file = tmp_path / "test.md"
+        input_file.write_text("Body content")
+        output_file = tmp_path / "test.ds.md"
+
+        result = runner.invoke(
+            main,
+            [
+                "create",
+                str(input_file),
+                "--name",
+                "test",
+                "--title",
+                "Test",
+                "--objective",
+                "Testing",
+                "--author",
+                "Same Person",
+                "--sign",
+                "--signed-by",
+                "Same Person",
+                "-o",
+                str(output_file),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Warning" not in result.output
+
+    def test_sign_warns_when_signed_by_differs_from_author(self, tmp_path, monkeypatch):
+        """Sign command should warn when --signed-by doesn't match authors."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        runner.invoke(main, ["generate-keys"])
+
+        # Create a dossier first (unsigned)
+        dossier_file = tmp_path / "test.ds.md"
+        dossier_file.write_text("""---
+schema_version: "1.0.0"
+title: Test
+version: "1.0.0"
+status: draft
+objective: Testing
+name: test
+authors:
+  - name: Alice
+  - name: Bob
+checksum:
+  algorithm: sha256
+  hash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+---
+
+test""")
+
+        result = runner.invoke(
+            main,
+            ["sign", str(dossier_file), "--signed-by", "Charlie"],
+        )
+
+        assert result.exit_code == 0
+        assert "Warning" in result.output
+        assert "Charlie" in result.output
+        assert "does not match any author" in result.output
+
+    def test_sign_no_warning_when_signed_by_matches_author(self, tmp_path, monkeypatch):
+        """Sign command should NOT warn when --signed-by matches an author."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        runner.invoke(main, ["generate-keys"])
+
+        dossier_file = tmp_path / "test.ds.md"
+        dossier_file.write_text("""---
+schema_version: "1.0.0"
+title: Test
+version: "1.0.0"
+status: draft
+objective: Testing
+name: test
+authors:
+  - name: Alice
+  - name: Bob
+checksum:
+  algorithm: sha256
+  hash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+---
+
+test""")
+
+        result = runner.invoke(
+            main,
+            ["sign", str(dossier_file), "--signed-by", "Bob"],
+        )
+
+        assert result.exit_code == 0
+        assert "Warning" not in result.output

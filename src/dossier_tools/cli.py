@@ -18,6 +18,7 @@ from .core import (
     calculate_checksum,
     parse_content,
     parse_file,
+    update_checksum,
     validate_file,
     validate_frontmatter,
     verify_checksum,
@@ -197,13 +198,15 @@ def create(
     # Validate required fields and authors format
     _validate_create_frontmatter(fm)
 
-    # Calculate checksum
-    checksum_hash = calculate_checksum(body)
-    fm["checksum"] = {"algorithm": "sha256", "hash": checksum_hash}
-
-    # Build dossier content
+    # Build dossier content with placeholder checksum
+    # We need to do a round-trip through frontmatter to normalize the body
+    # (e.g., trailing newlines may be stripped), then calculate the checksum
+    fm["checksum"] = {"algorithm": "sha256", "hash": ""}
     post = frontmatter.Post(body, **fm)
     content = frontmatter.dumps(post)
+
+    # Recalculate checksum after frontmatter normalization
+    content = update_checksum(content)
 
     # Optionally sign
     if do_sign:
@@ -213,6 +216,16 @@ def create(
         if not key_exists(key_name):
             click.echo(f"Error: Key '{key_name}' not found. Run 'dossier generate-keys' first.", err=True)
             sys.exit(1)
+
+        # Warn if signed_by doesn't match any author
+        author_names = [a["name"] for a in fm.get("authors", []) if isinstance(a, dict)]
+        if signed_by not in author_names:
+            click.echo(
+                f"Warning: --signed-by '{signed_by}' does not match any author. "
+                "Note: signed_by is a self-reported label; trust is based on the public key in trusted-keys.txt.",
+                err=True,
+            )
+
         signer = load_signer(key_name)
         content = sign_dossier(content, signer, signed_by)
 
@@ -306,7 +319,7 @@ def checksum(file: Path, do_update: bool, as_json: bool) -> None:
 @click.argument("file", type=click.Path(exists=True, path_type=Path))
 @click.option("--key", "key_name", default="default", help="Key name from ~/.dossier/ (default: 'default')")
 @click.option("--key-file", type=click.Path(exists=True, path_type=Path), help="Path to PEM key file")
-@click.option("--signed-by", required=True, help="Signer identity (e.g., email)")
+@click.option("--signed-by", required=True, help="Signer identity (e.g., email). Note: self-reported, not verified.")
 @click.option("-o", "--output", type=click.Path(path_type=Path), help="Output file (default: modify in place)")
 def sign(file: Path, key_name: str, key_file: Path | None, signed_by: str, output: Path | None) -> None:
     """Sign a dossier."""
@@ -319,8 +332,24 @@ def sign(file: Path, key_name: str, key_file: Path | None, signed_by: str, outpu
             sys.exit(1)
         signer = load_signer(key_name)
 
-    # Read and sign
+    # Read and parse file
     content = file.read_text(encoding="utf-8")
+    try:
+        parsed = parse_content(content)
+    except ParseError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    # Warn if signed_by doesn't match any author
+    author_names = [a["name"] for a in parsed.frontmatter.get("authors", []) if isinstance(a, dict)]
+    if signed_by not in author_names:
+        click.echo(
+            f"Warning: --signed-by '{signed_by}' does not match any author. "
+            "Note: signed_by is a self-reported label; trust is based on the public key in trusted-keys.txt.",
+            err=True,
+        )
+
+    # Sign
     signed_content = sign_dossier(content, signer, signed_by)
 
     # Write output
@@ -662,6 +691,8 @@ def publish(file: Path, namespace: str, changelog: str | None) -> None:
             click.echo(f"Published {full_name}@{version}")
             if "content_url" in result:
                 click.echo(f"URL: {result['content_url']}")
+            click.echo()
+            click.echo("Note: It may take 1-2 minutes for the dossier to appear in 'dossier list'.")
     except RegistryError as e:
         if e.status_code == http.HTTPStatus.UNAUTHORIZED:
             click.echo("Session expired. Run 'dossier login' to re-authenticate.", err=True)
