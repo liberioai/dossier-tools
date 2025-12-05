@@ -550,7 +550,7 @@ def pull(name: str, output: Path | None) -> None:
 
     # Write file
     output.write_text(content, encoding="utf-8")
-    click.echo(f"Downloaded: {output}")
+    click.echo(f"Downloaded: {output.resolve()}")
 
     if digest:
         click.echo(f"Digest: {digest}")
