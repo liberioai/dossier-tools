@@ -97,8 +97,11 @@ def display_metadata(fm: dict[str, Any], source: str, as_json: bool) -> None:
 
     # Core fields
     fields = [
-        ("name", "Name"), ("title", "Title"), ("version", "Version"),
-        ("status", "Status"), ("objective", "Objective"),
+        ("name", "Name"),
+        ("title", "Title"),
+        ("version", "Version"),
+        ("status", "Status"),
+        ("objective", "Objective"),
     ]
     for key, label in fields:
         if key in fm:
