@@ -38,6 +38,7 @@ class RegistryClient:
             base_url=f"{self.base_url}/api/v1",
             headers=self._build_headers(),
             timeout=30.0,
+            follow_redirects=True,
         )
         logger.debug("Initialized registry client: %s", self.base_url)
 

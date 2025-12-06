@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import http
 import json
+import shutil
+import subprocess
 import sys
 from collections import OrderedDict
 from pathlib import Path
@@ -51,6 +53,7 @@ COMMAND_SECTIONS: dict[str, list[str]] = OrderedDict(
     [
         ("Local Commands", ["init", "generate-keys", "create", "validate", "checksum", "sign", "verify", "info"]),
         ("Registry Commands", ["list", "get", "pull", "publish", "login", "logout", "whoami"]),
+        ("Execution Commands", ["run"]),
     ]
 )
 
@@ -703,6 +706,62 @@ def publish(file: Path, namespace: str, changelog: str | None) -> None:
         else:
             click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+
+# --- Execution commands ---
+
+
+@main.command()
+@click.argument("name")
+@click.option("--print-only", is_flag=True, help="Print the workflow content instead of running it")
+def run(name: str, print_only: bool) -> None:
+    """Run a dossier workflow using Claude Code.
+
+    Pulls the workflow from the registry and starts an interactive Claude Code
+    session with the workflow as the initial prompt.
+
+    NAME can be 'workflow-name' or 'workflow-name@version'.
+
+    Supported agents: Claude Code only (https://claude.ai/code)
+    """
+    # Check if claude is available
+    claude_path = shutil.which("claude")
+    if not claude_path and not print_only:
+        click.echo("Error: Claude Code is not installed or not in PATH.", err=True)
+        click.echo("", err=True)
+        click.echo("To install Claude Code, visit: https://claude.ai/code", err=True)
+        click.echo("", err=True)
+        click.echo("Note: Currently, only Claude Code is supported as an execution agent.", err=True)
+        sys.exit(1)
+
+    # Pull the workflow from registry
+    dossier_name, version = parse_name_version(name)
+
+    try:
+        with get_client() as client:
+            content, _ = client.pull_content(dossier_name, version=version)
+    except RegistryError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    if print_only:
+        click.echo(content)
+        return
+
+    # Execute with Claude Code
+    click.echo(f"Running workflow: {dossier_name}" + (f"@{version}" if version else ""))
+    click.echo("Starting Claude Code...")
+    click.echo()
+
+    # Start interactive Claude Code session with workflow as initial prompt
+    # claude_path is guaranteed to be set here (checked above)
+    # Use "--" to signal end of options, since content may start with "---"
+    result = subprocess.run(
+        [claude_path, "--", content],
+        check=False,
+    )
+
+    sys.exit(result.returncode)
 
 
 if __name__ == "__main__":
