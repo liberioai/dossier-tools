@@ -83,7 +83,7 @@ def _validate_create_frontmatter(fm: dict[str, Any]) -> None:
             sys.exit(1)
 
 
-@main.command()
+@main.command("from-file")
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
 @click.option("-o", "--output", type=click.Path(path_type=Path), help="Output file (default: .ds.md extension)")
 @click.option("--meta", type=click.Path(exists=True, path_type=Path), help="JSON file with frontmatter fields")
@@ -96,7 +96,7 @@ def _validate_create_frontmatter(fm: dict[str, Any]) -> None:
 @click.option("--sign", "do_sign", is_flag=True, help="Sign the dossier after creation")
 @click.option("--key", "key_name", default="default", help="Key name for signing (default: 'default')")
 @click.option("--signed-by", help="Signer identity (required if --sign)")
-def create(
+def from_file(
     input_file: Path,
     output: Path | None,
     meta: Path | None,

@@ -71,19 +71,26 @@ dossier run myorg/setup-dev --print-only
 
 > **Note**: Currently only [Claude Code](https://claude.ai/code) is supported as an execution agent.
 
-### Create and Sign Your Own
+### Create a New Dossier
+
+```bash
+# Create with AI assistance (interactive)
+dossier new
+
+# Or from an existing markdown file
+dossier from-file workflow.md \
+  --name "my-workflow" \
+  --title "My Workflow" \
+  --objective "Automate something useful" \
+  --author "you"
+```
+
+### Sign and Verify
 
 ```bash
 # Initialize and generate signing keys
 dossier init
 dossier generate-keys
-
-# Create a dossier from markdown
-dossier create workflow.md \
-  --name "my-workflow" \
-  --title "My Workflow" \
-  --objective "Automate something useful" \
-  --author "you"
 
 # Validate and sign
 dossier validate workflow.ds.md
@@ -117,15 +124,16 @@ dossier publish workflow.ds.md --namespace myorg/tools
 
 | Command | Description |
 |---------|-------------|
+| `new` | Create a new dossier with AI assistance |
 | `run` | Pull and execute a dossier with Claude Code |
-| `list` | List dossiers from the registry |
-| `pull` | Download a dossier |
-| `get` | Get dossier metadata |
-| `create` | Create a dossier from markdown |
+| `from-file` | Create a dossier from an existing markdown file |
 | `validate` | Validate frontmatter schema |
 | `checksum` | Verify or update checksum |
 | `sign` | Sign a dossier |
 | `verify` | Verify checksum and signature |
+| `list` | List dossiers from the registry |
+| `pull` | Download a dossier |
+| `get` | Get dossier metadata |
 | `publish` | Publish to the registry |
 | `login` / `logout` | Manage authentication |
 

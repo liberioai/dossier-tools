@@ -127,7 +127,7 @@ class TestCreate:
 
         result = runner.invoke(
             main,
-            ["create", str(input_file), "--name", "test", "--objective", "Test", "--author", "test@example.com"],
+            ["from-file", str(input_file), "--name", "test", "--objective", "Test", "--author", "test@example.com"],
         )
 
         assert result.exit_code == 1
@@ -143,7 +143,7 @@ class TestCreate:
 
         result = runner.invoke(
             main,
-            ["create", str(input_file), "--name", "test", "--title", "Test", "--author", "test@example.com"],
+            ["from-file", str(input_file), "--name", "test", "--title", "Test", "--author", "test@example.com"],
         )
 
         assert result.exit_code == 1
@@ -159,7 +159,7 @@ class TestCreate:
 
         result = runner.invoke(
             main,
-            ["create", str(input_file), "--name", "test", "--title", "Test", "--objective", "Test objective"],
+            ["from-file", str(input_file), "--name", "test", "--title", "Test", "--objective", "Test objective"],
         )
 
         assert result.exit_code == 1
@@ -179,7 +179,7 @@ class TestCreate:
         result = runner.invoke(
             main,
             [
-                "create",
+                "from-file",
                 str(input_file),
                 "--name",
                 "test",
@@ -208,7 +208,7 @@ class TestCreate:
         result = runner.invoke(
             main,
             [
-                "create",
+                "from-file",
                 str(input_file),
                 "--name",
                 "test",
@@ -239,7 +239,7 @@ class TestCreate:
         result = runner.invoke(
             main,
             [
-                "create",
+                "from-file",
                 str(input_file),
                 "--name",
                 "test-dossier",
@@ -282,7 +282,7 @@ class TestCreate:
             )
         )
 
-        result = runner.invoke(main, ["create", str(input_file), "--meta", str(meta_file)])
+        result = runner.invoke(main, ["from-file", str(input_file), "--meta", str(meta_file)])
 
         assert result.exit_code == 0
         content = (tmp_path / "input.ds.md").read_text()
@@ -304,7 +304,7 @@ class TestCreate:
         result = runner.invoke(
             main,
             [
-                "create",
+                "from-file",
                 str(input_file),
                 "--name",
                 "signed-dossier",
@@ -1334,7 +1334,7 @@ class TestCreateSignChecksum:
         result = runner.invoke(
             main,
             [
-                "create",
+                "from-file",
                 str(input_file),
                 "--name",
                 "test",
@@ -1376,7 +1376,7 @@ class TestCreateSignChecksum:
         runner.invoke(
             main,
             [
-                "create",
+                "from-file",
                 str(input_file),
                 "--name",
                 "test",
@@ -1467,7 +1467,7 @@ class TestSignedByWarning:
         result = runner.invoke(
             main,
             [
-                "create",
+                "from-file",
                 str(input_file),
                 "--name",
                 "test",
@@ -1505,7 +1505,7 @@ class TestSignedByWarning:
         result = runner.invoke(
             main,
             [
-                "create",
+                "from-file",
                 str(input_file),
                 "--name",
                 "test",

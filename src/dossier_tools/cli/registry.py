@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -226,6 +227,11 @@ def publish(file: Path, namespace: str, changelog: str | None) -> None:
 # --- Execution commands ---
 
 
+def _is_inside_claude_code() -> bool:
+    """Check if we're running inside a Claude Code session."""
+    return os.environ.get("CLAUDECODE") == "1"
+
+
 @main.command()
 @click.argument("name")
 @click.option("--print-only", is_flag=True, help="Print the workflow content instead of running it")
@@ -235,13 +241,18 @@ def run(name: str, print_only: bool) -> None:
     Pulls the workflow from the registry and starts an interactive Claude Code
     session with the workflow as the initial prompt.
 
+    If already running inside Claude Code, prints the workflow content for the
+    current session to execute instead of spawning a nested session.
+
     NAME can be 'workflow-name' or 'workflow-name@version'.
 
     Supported agents: Claude Code only (https://claude.ai/code)
     """
-    # Check if claude is available
+    inside_claude = _is_inside_claude_code()
+
+    # Check if claude is available (only needed if not inside Claude and not print-only)
     claude_path = shutil.which("claude")
-    if not claude_path and not print_only:
+    if not claude_path and not print_only and not inside_claude:
         click.echo("Error: Claude Code is not installed or not in PATH.", err=True)
         click.echo("", err=True)
         click.echo("To install Claude Code, visit: https://claude.ai/code", err=True)
@@ -259,7 +270,11 @@ def run(name: str, print_only: bool) -> None:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
-    if print_only:
+    # If print-only or inside Claude Code, just output the content
+    if print_only or inside_claude:
+        if inside_claude and not print_only:
+            click.echo(f"Running workflow: {dossier_name}" + (f"@{version}" if version else ""))
+            click.echo()
         click.echo(content)
         return
 
@@ -277,3 +292,26 @@ def run(name: str, print_only: bool) -> None:
     )
 
     sys.exit(result.returncode)
+
+
+DEFAULT_CREATE_TEMPLATE = "imboard-ai/meta/create-dossier"
+
+
+@main.command()
+@click.option(
+    "--template",
+    default=DEFAULT_CREATE_TEMPLATE,
+    help=f"Template dossier (default: {DEFAULT_CREATE_TEMPLATE})",
+)
+def new(template: str) -> None:
+    """Create a new dossier with AI assistance.
+
+    Pulls a template dossier from the registry and runs it to guide you through
+    creating a new dossier from scratch.
+
+    Uses Claude Code to interactively help you write the workflow instructions,
+    validation criteria, and metadata.
+    """
+    # Delegate to run command
+    ctx = click.get_current_context()
+    ctx.invoke(run, name=template, print_only=False)
