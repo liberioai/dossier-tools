@@ -1,31 +1,49 @@
 # dossier-tools
 
-Validation, signing, and verification tools for `.ds.md` files.
+**CLI and library for validating, signing, and running Dossier workflow files (`.ds.md`).**
 
-A `.ds.md` file is a markdown document with structured YAML frontmatter containing metadata like title, version, checksum, and cryptographic signature. This package provides tools to validate the frontmatter schema, verify content integrity via SHA256 checksums, and sign/verify files using Ed25519.
+## What is a Dossier?
+
+A **Dossier** is a markdown file with structured frontmatter that AI agents can execute. Think of it as a recipe for automation—clear instructions that LLMs like Claude Code can follow intelligently.
+
+**Why use Dossiers instead of scripts?**
+- **Adaptive**: LLMs understand context and handle edge cases naturally
+- **Portable**: Same dossier works across different projects and environments
+- **Verifiable**: Built-in checksums and signatures ensure integrity
+- **Human-readable**: Plain markdown that anyone can read and modify
 
 ```markdown
 ---
 schema_version: "1.0.0"
-title: Deploy to Production
+title: Setup Development Environment
 version: "1.0.0"
 status: stable
-objective: Deploy application to production with validation
+objective: Configure dev environment with proper tooling
 authors:
   - name: Alice
 checksum:
   algorithm: sha256
   hash: a3b5c8d9...
-signature:
-  algorithm: ed25519
-  public_key: RWT...
-  signed_by: alice@example.com
 ---
 
-# Deploy to Production
+# Setup Development Environment
 
-Your markdown content here...
+## Objective
+Configure a development environment with linting, testing, and git hooks.
+
+## Steps
+1. Detect project type (Node.js, Python, etc.)
+2. Install appropriate dev dependencies
+3. Configure pre-commit hooks
+4. Verify setup works
+
+## Validation
+- All linters pass
+- Tests run successfully
+- Git hooks are installed
 ```
+
+📖 **Learn more**: [What is a Dossier?](./docs/what-is-a-dossier.md)
 
 ## Installation
 
@@ -41,17 +59,35 @@ uv add dossier-tools
 
 ## Quick Start
 
+### Run a Dossier from the Registry
+
 ```bash
-# Initialize and generate keys
+# Run a workflow (starts interactive Claude Code session)
+dossier run myorg/setup-dev
+
+# Preview without executing
+dossier run myorg/setup-dev --print-only
+```
+
+> **Note**: Currently only [Claude Code](https://claude.ai/code) is supported as an execution agent.
+
+### Create and Sign Your Own
+
+```bash
+# Initialize and generate signing keys
 dossier init
 dossier generate-keys
 
 # Create a dossier from markdown
-dossier create workflow.md --title "My Workflow" --objective "Do something" --author "you@example.com"
+dossier create workflow.md \
+  --name "my-workflow" \
+  --title "My Workflow" \
+  --objective "Automate something useful" \
+  --author "you"
 
-# Validate, sign, and verify
+# Validate and sign
 dossier validate workflow.ds.md
-dossier sign workflow.ds.md --signed-by "you@example.com"
+dossier sign workflow.ds.md --signed-by "you"
 dossier verify workflow.ds.md
 ```
 
@@ -63,32 +99,47 @@ Browse and download dossiers from the public registry:
 # List available dossiers
 dossier list
 
-# Get metadata for a dossier
+# Get metadata
 dossier get myorg/deploy
 
-# Download a dossier
+# Download locally
 dossier pull myorg/deploy
 ```
 
-Publish your own dossiers (requires GitHub authentication):
+Publish your own (requires GitHub authentication):
 
 ```bash
 dossier login
-dossier publish workflow.ds.md
+dossier publish workflow.ds.md --namespace myorg/tools
 ```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `run` | Pull and execute a dossier with Claude Code |
+| `list` | List dossiers from the registry |
+| `pull` | Download a dossier |
+| `get` | Get dossier metadata |
+| `create` | Create a dossier from markdown |
+| `validate` | Validate frontmatter schema |
+| `checksum` | Verify or update checksum |
+| `sign` | Sign a dossier |
+| `verify` | Verify checksum and signature |
+| `publish` | Publish to the registry |
+| `login` / `logout` | Manage authentication |
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DOSSIER_REGISTRY_URL` | Registry API URL | `https://dossier-registry-mvp.vercel.app` |
+| `DOSSIER_REGISTRY_URL` | Registry API URL | `https://dossier-registry-mvp-ten.vercel.app` |
 | `DOSSIER_SIGNING_KEY` | Default signing key name | `default` |
 | `DOSSIER_LOG_LEVEL` | Log level (DEBUG, INFO, WARNING, ERROR) | `WARNING` |
 
 ## Documentation
 
-See [docs/](./docs/) for detailed documentation:
-
+- [What is a Dossier?](./docs/what-is-a-dossier.md) — Concept, use cases, and comparisons
 - [CLI Reference](./docs/cli.md) — All commands and options
 - [Python API](./docs/api.md) — Using dossier-tools as a library
 - [Schema Reference](./docs/schema.md) — Frontmatter field reference
@@ -97,19 +148,11 @@ See [docs/](./docs/) for detailed documentation:
 ## Development
 
 ```bash
-# Clone and setup
-git clone https://github.com/tal-liberio/dossier-tools.git
+git clone https://github.com/liberioai/dossier-tools.git
 cd dossier-tools
-make setup    # Install dependencies with uv
-
-# Run tests
-make test
-
-# Format code
-make format
-
-# Check formatting and lint
-make check
+make setup    # Install dependencies
+make test     # Run tests
+make format   # Format code
 ```
 
 ## License
