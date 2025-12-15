@@ -224,6 +224,51 @@ def publish(file: Path, namespace: str, changelog: str | None) -> None:
         sys.exit(1)
 
 
+@main.command()
+@click.argument("name")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def remove(name: str, yes: bool) -> None:
+    """Remove a dossier from the registry.
+
+    NAME can be 'dossier-name' to remove all versions, or 'dossier-name@version'
+    to remove a specific version.
+
+    Requires authentication. You must have permission to delete the dossier.
+    """
+    token = load_token()
+    if not token:
+        click.echo("Not logged in. Run 'dossier login' first.", err=True)
+        sys.exit(1)
+
+    dossier_name, version = parse_name_version(name)
+    target = f"{dossier_name}@{version}" if version else dossier_name
+
+    # Confirm deletion
+    if not yes:
+        if version:
+            msg = f"Are you sure you want to remove version '{version}' of '{dossier_name}'?"
+        else:
+            msg = f"Are you sure you want to remove '{dossier_name}' and ALL its versions?"
+        if not click.confirm(msg):
+            click.echo("Aborted.")
+            return
+
+    try:
+        with get_client(token=token) as client:
+            client.delete_dossier(dossier_name, version=version)
+            click.echo(f"Removed: {target}")
+    except RegistryError as e:
+        if e.status_code == http.HTTPStatus.UNAUTHORIZED:
+            click.echo("Session expired. Run 'dossier login' to re-authenticate.", err=True)
+        elif e.status_code == http.HTTPStatus.FORBIDDEN:
+            click.echo(f"Permission denied: {e}", err=True)
+        elif e.status_code == http.HTTPStatus.NOT_FOUND:
+            click.echo(f"Not found: {target}", err=True)
+        else:
+            click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
 # --- Execution commands ---
 
 

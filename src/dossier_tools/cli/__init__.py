@@ -14,7 +14,7 @@ from ..logging import configure_logging
 COMMAND_SECTIONS: dict[str, list[str]] = OrderedDict(
     [
         ("Local Commands", ["init", "generate-keys", "from-file", "validate", "checksum", "sign", "verify", "info"]),
-        ("Registry Commands", ["list", "get", "pull", "publish", "login", "logout", "whoami"]),
+        ("Registry Commands", ["list", "get", "pull", "publish", "remove", "login", "logout", "whoami"]),
         ("Execution Commands", ["run", "new"]),
     ]
 )
