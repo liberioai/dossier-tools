@@ -200,6 +200,31 @@ class RegistryClient:
         logger.info("Published: %s", result.get("name", namespace))
         return result
 
+    def delete_dossier(self, name: str, version: str | None = None) -> dict[str, Any]:
+        """Delete a dossier from the registry.
+
+        Args:
+            name: Dossier name (e.g., 'myorg/deploy')
+            version: Optional specific version to delete. If not provided,
+                     deletes the entire dossier (all versions).
+
+        Returns:
+            Dict with deletion confirmation
+
+        Raises:
+            RegistryError: If deletion fails (401, 403, 404, etc.)
+        """
+        params = {}
+        if version:
+            params["version"] = version
+
+        target = f"{name}@{version}" if version else name
+        logger.debug("Deleting dossier: %s", target)
+        response = self._client.delete(f"/dossiers/{name}", params=params)
+        result = self._handle_response(response)
+        logger.info("Deleted: %s", target)
+        return result
+
     def close(self) -> None:
         """Close the HTTP client."""
         self._client.close()

@@ -330,6 +330,89 @@ version: "1.0.0"
         assert exc_info.value.status_code == http.HTTPStatus.CONFLICT
         assert exc_info.value.code == "VERSION_EXISTS"
 
+    @respx.mock
+    def test_delete_dossier(self):
+        """Should delete a dossier."""
+        respx.delete("https://registry.test/api/v1/dossiers/myorg/deploy").mock(
+            return_value=Response(
+                200,
+                json={"message": "Dossier deleted", "name": "myorg/deploy"},
+            )
+        )
+
+        client = RegistryClient("https://registry.test", token="my-token")
+        result = client.delete_dossier("myorg/deploy")
+
+        assert result["name"] == "myorg/deploy"
+
+    @respx.mock
+    def test_delete_dossier_with_version(self):
+        """Should delete specific version."""
+        route = respx.delete("https://registry.test/api/v1/dossiers/myorg/deploy").mock(
+            return_value=Response(
+                200,
+                json={"message": "Version deleted", "name": "myorg/deploy", "version": "1.0.0"},
+            )
+        )
+
+        client = RegistryClient("https://registry.test", token="my-token")
+        client.delete_dossier("myorg/deploy", version="1.0.0")
+
+        assert route.calls[0].request.url.params["version"] == "1.0.0"
+
+    @respx.mock
+    def test_delete_dossier_not_found(self):
+        """Should raise RegistryError on 404."""
+        respx.delete("https://registry.test/api/v1/dossiers/myorg/missing").mock(
+            return_value=Response(
+                404,
+                json={"error": {"code": "DOSSIER_NOT_FOUND", "message": "Dossier not found"}},
+            )
+        )
+
+        client = RegistryClient("https://registry.test", token="my-token")
+
+        with pytest.raises(RegistryError) as exc_info:
+            client.delete_dossier("myorg/missing")
+
+        assert exc_info.value.status_code == http.HTTPStatus.NOT_FOUND
+        assert exc_info.value.code == "DOSSIER_NOT_FOUND"
+
+    @respx.mock
+    def test_delete_dossier_unauthorized(self):
+        """Should raise on 401."""
+        respx.delete("https://registry.test/api/v1/dossiers/myorg/deploy").mock(
+            return_value=Response(
+                401,
+                json={"error": {"code": "UNAUTHORIZED", "message": "Authentication required"}},
+            )
+        )
+
+        client = RegistryClient("https://registry.test")
+
+        with pytest.raises(RegistryError) as exc_info:
+            client.delete_dossier("myorg/deploy")
+
+        assert exc_info.value.status_code == http.HTTPStatus.UNAUTHORIZED
+
+    @respx.mock
+    def test_delete_dossier_forbidden(self):
+        """Should raise on 403."""
+        respx.delete("https://registry.test/api/v1/dossiers/myorg/deploy").mock(
+            return_value=Response(
+                403,
+                json={"error": {"code": "FORBIDDEN", "message": "You do not have permission to delete this dossier"}},
+            )
+        )
+
+        client = RegistryClient("https://registry.test", token="my-token")
+
+        with pytest.raises(RegistryError) as exc_info:
+            client.delete_dossier("myorg/deploy")
+
+        assert exc_info.value.status_code == http.HTTPStatus.FORBIDDEN
+        assert exc_info.value.code == "FORBIDDEN"
+
 
 class TestGetRegistryUrl:
     """Tests for get_registry_url."""
