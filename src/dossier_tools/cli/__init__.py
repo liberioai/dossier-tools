@@ -14,7 +14,8 @@ from ..logging import configure_logging
 COMMAND_SECTIONS: dict[str, list[str]] = OrderedDict(
     [
         ("Local Commands", ["init", "generate-keys", "from-file", "validate", "checksum", "sign", "verify", "info"]),
-        ("Registry Commands", ["list", "get", "pull", "publish", "remove", "login", "logout", "whoami"]),
+        ("Registry Commands", ["list", "get", "pull", "export", "publish", "remove", "login", "logout", "whoami"]),
+        ("Cache Commands", ["cache"]),
         ("Execution Commands", ["run", "new"]),
     ]
 )
@@ -121,4 +122,4 @@ def display_metadata(fm: dict[str, Any], source: str, as_json: bool) -> None:
 
 
 # Import and register commands from submodules
-from . import local, registry  # noqa: E402, F401
+from . import cache, local, registry  # noqa: E402, F401

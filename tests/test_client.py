@@ -38,9 +38,9 @@ class TestRegistryClient:
         client = RegistryClient("https://registry.test")
         result = client.list_dossiers()
 
-        assert len(result["dossiers"]) == 2  # noqa: PLR2004
+        assert len(result["dossiers"]) == 2
         assert result["dossiers"][0]["name"] == "myorg/deploy"
-        assert result["pagination"]["total"] == 2  # noqa: PLR2004
+        assert result["pagination"]["total"] == 2
 
     @respx.mock
     def test_list_dossiers_with_category(self):
