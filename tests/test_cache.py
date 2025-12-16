@@ -406,3 +406,24 @@ class TestPathTraversalProtection:
 
         with pytest.raises(CacheError, match="Invalid dossier version"):
             get_cached_path("myorg/deploy", "1.0.0/malicious")
+
+    def test_delete_cached_rejects_path_traversal(self, tmp_path, monkeypatch):
+        """Should reject path traversal in delete_cached."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        with pytest.raises(CacheError, match="Invalid dossier name"):
+            delete_cached("../../../etc", "passwd")
+
+    def test_delete_cached_rejects_version_path_traversal(self, tmp_path, monkeypatch):
+        """Should reject version path traversal in delete_cached."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        with pytest.raises(CacheError, match="Invalid dossier version"):
+            delete_cached("myorg/deploy", "../../../etc/passwd")
+
+    def test_get_latest_cached_rejects_path_traversal(self, tmp_path, monkeypatch):
+        """Should reject path traversal in get_latest_cached."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        with pytest.raises(CacheError, match="Invalid dossier name"):
+            get_latest_cached("../../../etc")

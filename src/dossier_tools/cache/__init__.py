@@ -252,7 +252,11 @@ def get_latest_cached(name: str) -> CachedDossier | None:
 
     Returns:
         CachedDossier for most recent version, or None if not cached.
+
+    Raises:
+        CacheError: If name contains path traversal attempts.
     """
+    _validate_path_component(name, "name")
     dossier_dir = get_cache_dir() / name
 
     if not dossier_dir.exists():
@@ -357,7 +361,14 @@ def delete_cached(name: str, version: str | None = None) -> int:
 
     Returns:
         Number of versions deleted.
+
+    Raises:
+        CacheError: If name or version contains path traversal attempts.
     """
+    _validate_path_component(name, "name")
+    if version:
+        _validate_path_component(version, "version")
+
     cache_dir = get_cache_dir()
     dossier_dir = cache_dir / name
     deleted = 0
