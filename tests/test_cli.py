@@ -11,6 +11,13 @@ from dossier_tools.signing import get_dossier_dir, get_private_key_path, get_pub
 
 from .conftest import FIXTURES_DIR
 
+# Test helper for cache metadata
+TEST_CACHE_META = json.dumps({
+    "cached_at": "2025-01-01T00:00:00Z",
+    "version": "1.0.0",
+    "source_registry_url": "test",
+})
+
 
 class TestCommandSections:
     """Tests for CLI command organization."""
@@ -867,13 +874,13 @@ class TestGet:
 
 
 class TestPull:
-    """Tests for pull command."""
+    """Tests for pull command (caching to ~/.dossier/cache/)."""
 
     @respx.mock
     def test_pull_dossier(self, tmp_path, monkeypatch):
-        """Should download dossier to file."""
+        """Should cache dossier to ~/.dossier/cache/."""
         monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
 
         content = """---
 title: Deploy
@@ -882,6 +889,11 @@ version: "1.0.0"
 
 # Deploy
 """
+        # Mock metadata endpoint (to resolve version)
+        respx.get("https://registry.test/api/v1/dossiers/myorg/deploy").mock(
+            return_value=Response(200, json={"name": "myorg/deploy", "version": "1.0.0", "title": "Deploy"})
+        )
+        # Mock content endpoint
         respx.get("https://registry.test/api/v1/dossiers/myorg/deploy/content").mock(
             return_value=Response(200, text=content, headers={"X-Dossier-Digest": "sha256:abc123"})
         )
@@ -890,15 +902,123 @@ version: "1.0.0"
         result = runner.invoke(main, ["pull", "myorg/deploy"])
 
         assert result.exit_code == 0
-        assert "Downloaded" in result.output
+        assert "Cached" in result.output
 
-        # Check file was created
+        # Check file was cached
+        cache_file = tmp_path / ".dossier" / "cache" / "myorg" / "deploy" / "1.0.0.ds.md"
+        assert cache_file.exists()
+        assert cache_file.read_text() == content
+
+        # Check metadata file was created
+        meta_file = tmp_path / ".dossier" / "cache" / "myorg" / "deploy" / "1.0.0.meta.json"
+        assert meta_file.exists()
+
+    @respx.mock
+    def test_pull_with_version(self, tmp_path, monkeypatch):
+        """Should request specific version."""
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        content = "---\nversion: '1.0.0'\n---\ncontent"
+        route = respx.get("https://registry.test/api/v1/dossiers/myorg/deploy/content").mock(
+            return_value=Response(200, text=content, headers={})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["pull", "myorg/deploy@1.0.0"])
+
+        assert result.exit_code == 0
+        assert route.calls[0].request.url.params["version"] == "1.0.0"
+
+        # Check cache
+        cache_file = tmp_path / ".dossier" / "cache" / "myorg" / "deploy" / "1.0.0.ds.md"
+        assert cache_file.exists()
+
+    @respx.mock
+    def test_pull_skips_if_cached(self, tmp_path, monkeypatch):
+        """Should skip download if already cached."""
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        # Pre-create cache
+        cache_dir = tmp_path / ".dossier" / "cache" / "myorg" / "deploy"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "1.0.0.ds.md").write_text("cached content")
+        (cache_dir / "1.0.0.meta.json").write_text(TEST_CACHE_META)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["pull", "myorg/deploy@1.0.0"])
+
+        assert result.exit_code == 0
+        assert "already cached" in result.output
+
+    @respx.mock
+    def test_pull_force_redownloads(self, tmp_path, monkeypatch):
+        """Should re-download with --force even if cached."""
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        # Pre-create cache
+        cache_dir = tmp_path / ".dossier" / "cache" / "myorg" / "deploy"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "1.0.0.ds.md").write_text("old content")
+        (cache_dir / "1.0.0.meta.json").write_text(TEST_CACHE_META)
+
+        respx.get("https://registry.test/api/v1/dossiers/myorg/deploy/content").mock(
+            return_value=Response(200, text="new content", headers={})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["pull", "myorg/deploy@1.0.0", "--force"])
+
+        assert result.exit_code == 0
+        assert "Cached" in result.output
+
+        # Check content was updated
+        cache_file = cache_dir / "1.0.0.ds.md"
+        assert cache_file.read_text() == "new content"
+
+    @respx.mock
+    def test_pull_not_found(self, monkeypatch):
+        """Should error on 404."""
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+
+        respx.get("https://registry.test/api/v1/dossiers/myorg/missing").mock(
+            return_value=Response(404, json={"error": {"code": "DOSSIER_NOT_FOUND", "message": "Dossier not found"}})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["pull", "myorg/missing"])
+
+        assert result.exit_code == 1
+
+
+class TestExport:
+    """Tests for export command."""
+
+    @respx.mock
+    def test_export_default_filename(self, tmp_path, monkeypatch):
+        """Should export to default filename."""
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+        monkeypatch.chdir(tmp_path)
+
+        content = "---\ntitle: Deploy\n---\n# Deploy"
+        respx.get("https://registry.test/api/v1/dossiers/myorg/deploy/content").mock(
+            return_value=Response(200, text=content, headers={"X-Dossier-Digest": "sha256:abc123"})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["export", "myorg/deploy"])
+
+        assert result.exit_code == 0
+        assert "Exported" in result.output
+
         output_file = tmp_path / "myorg-deploy.ds.md"
         assert output_file.exists()
         assert output_file.read_text() == content
 
     @respx.mock
-    def test_pull_with_output(self, tmp_path, monkeypatch):
+    def test_export_with_output(self, tmp_path, monkeypatch):
         """Should save to specified output file."""
         monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
 
@@ -909,41 +1029,116 @@ version: "1.0.0"
         output_file = tmp_path / "custom.ds.md"
 
         runner = CliRunner()
-        result = runner.invoke(main, ["pull", "myorg/deploy", "-o", str(output_file)])
+        result = runner.invoke(main, ["export", "myorg/deploy", "-o", str(output_file)])
 
         assert result.exit_code == 0
         assert output_file.exists()
         assert output_file.read_text() == "content"
 
     @respx.mock
-    def test_pull_with_version(self, tmp_path, monkeypatch):
-        """Should request specific version."""
+    def test_export_stdout(self, monkeypatch):
+        """Should print to stdout with --stdout."""
         monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
-        monkeypatch.chdir(tmp_path)
 
-        route = respx.get("https://registry.test/api/v1/dossiers/myorg/deploy/content").mock(
-            return_value=Response(200, text="content", headers={})
+        content = "---\ntitle: Deploy\n---\n# Deploy"
+        respx.get("https://registry.test/api/v1/dossiers/myorg/deploy/content").mock(
+            return_value=Response(200, text=content, headers={})
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["pull", "myorg/deploy@1.0.0"])
+        result = runner.invoke(main, ["export", "myorg/deploy", "--stdout"])
 
         assert result.exit_code == 0
-        assert route.calls[0].request.url.params["version"] == "1.0.0"
+        assert content in result.output
 
-    @respx.mock
-    def test_pull_not_found(self, monkeypatch):
-        """Should error on 404."""
-        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
 
-        respx.get("https://registry.test/api/v1/dossiers/myorg/missing/content").mock(
-            return_value=Response(404, json={"error": {"code": "DOSSIER_NOT_FOUND", "message": "Dossier not found"}})
-        )
+class TestCacheCommands:
+    """Tests for cache subcommands."""
+
+    def test_cache_list_empty(self, tmp_path, monkeypatch):
+        """Should show empty message when no cached dossiers."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["pull", "myorg/missing"])
+        result = runner.invoke(main, ["cache", "list"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 0
+        assert "No cached dossiers" in result.output
+
+    def test_cache_list_shows_cached(self, tmp_path, monkeypatch):
+        """Should list cached dossiers."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        # Create cache entry
+        cache_dir = tmp_path / ".dossier" / "cache" / "myorg" / "deploy"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "1.0.0.ds.md").write_text("content")
+        (cache_dir / "1.0.0.meta.json").write_text(TEST_CACHE_META)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["cache", "list"])
+
+        assert result.exit_code == 0
+        assert "myorg/deploy" in result.output
+        assert "1.0.0" in result.output
+
+    def test_cache_list_json(self, tmp_path, monkeypatch):
+        """Should output JSON when requested."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        # Create cache entry
+        cache_dir = tmp_path / ".dossier" / "cache" / "myorg" / "deploy"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "1.0.0.ds.md").write_text("content")
+        (cache_dir / "1.0.0.meta.json").write_text(TEST_CACHE_META)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["cache", "list", "--json"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["name"] == "myorg/deploy"
+
+    def test_cache_clean_specific(self, tmp_path, monkeypatch):
+        """Should clean specific dossier."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        # Create cache entry
+        cache_dir = tmp_path / ".dossier" / "cache" / "myorg" / "deploy"
+        cache_dir.mkdir(parents=True)
+        cache_file = cache_dir / "1.0.0.ds.md"
+        meta_file = cache_dir / "1.0.0.meta.json"
+        cache_file.write_text("content")
+        meta_file.write_text(TEST_CACHE_META)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["cache", "clean", "myorg/deploy"])
+
+        assert result.exit_code == 0
+        assert "Removed" in result.output
+        assert not cache_file.exists()
+
+    def test_cache_clean_all(self, tmp_path, monkeypatch):
+        """Should clean all cached dossiers."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        # Create cache entries
+        for name in ["deploy", "backup"]:
+            cache_dir = tmp_path / ".dossier" / "cache" / "myorg" / name
+            cache_dir.mkdir(parents=True)
+            (cache_dir / "1.0.0.ds.md").write_text("content")
+            (cache_dir / "1.0.0.meta.json").write_text(TEST_CACHE_META)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["cache", "clean", "--all", "-y"])
+
+        assert result.exit_code == 0
+        assert "Removed 2" in result.output
+
+        # Verify cache is empty
+        cache_dir = tmp_path / ".dossier" / "cache"
+        assert not cache_dir.exists()
 
 
 class TestLogout:

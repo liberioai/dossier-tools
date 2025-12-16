@@ -12,6 +12,14 @@ from pathlib import Path
 
 import click
 
+from ..cache import (
+    CacheError,
+    cache_dossier,
+    get_cached_path,
+    get_latest_cached,
+    is_cached,
+    read_cached,
+)
 from ..core import (
     ParseError,
     parse_file,
@@ -34,9 +42,12 @@ from . import display_metadata, main
 
 @main.command("list")
 @click.option("--category", help="Filter by category")
+@click.option("--url", "show_url", is_flag=True, help="Show content URLs")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
-def list_cmd(category: str | None, as_json: bool) -> None:
+def list_cmd(category: str | None, show_url: bool, as_json: bool) -> None:
     """List dossiers from the registry."""
+    registry_url = get_registry_url()
+
     try:
         with get_client() as client:
             result = client.list_dossiers(category=category)
@@ -47,9 +58,23 @@ def list_cmd(category: str | None, as_json: bool) -> None:
     dossiers = result.get("dossiers", [])
 
     if as_json:
+        # Add URLs to JSON output if requested
+        if show_url:
+            for d in dossiers:
+                name = d.get("name", "")
+                d["content_url"] = f"{registry_url}/api/v1/dossiers/{name}/content"
         click.echo(json.dumps(result))
     elif not dossiers:
         click.echo("No dossiers found.")
+    elif show_url:
+        # Print with URLs
+        for d in dossiers:
+            name = d.get("name", "")
+            version = d.get("version", "")
+            title = d.get("title", "")
+            url = f"{registry_url}/api/v1/dossiers/{name}/content"
+            click.echo(f"{name:30} {version:10} {title}")
+            click.echo(f"  {url}")
     else:
         # Print as table
         for d in dossiers:
@@ -65,6 +90,7 @@ def list_cmd(category: str | None, as_json: bool) -> None:
 def get(name: str, as_json: bool) -> None:
     """Get dossier metadata from the registry."""
     dossier_name, version = parse_name_version(name)
+    registry_url = get_registry_url()
 
     try:
         with get_client() as client:
@@ -73,14 +99,107 @@ def get(name: str, as_json: bool) -> None:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
+    # Get resolved version from result
+    resolved_version = result.get("version", version)
+
+    if as_json:
+        # Add URLs and cache status to JSON output
+        result["registry_url"] = registry_url
+        result["content_url"] = f"{registry_url}/api/v1/dossiers/{dossier_name}/content"
+        if resolved_version and is_cached(dossier_name, resolved_version):
+            result["cached"] = str(get_cached_path(dossier_name, resolved_version))
+        else:
+            result["cached"] = None
+
     display_metadata(result, f"registry:{dossier_name}", as_json)
+
+    if not as_json:
+        # Display additional info
+        click.echo()
+        click.echo(f"{'Registry:':<11}{registry_url}")
+        click.echo(f"{'Content:':<11}{registry_url}/api/v1/dossiers/{dossier_name}/content")
+
+        if resolved_version and is_cached(dossier_name, resolved_version):
+            cache_path = get_cached_path(dossier_name, resolved_version)
+            click.echo(f"{'Cached:':<11}{cache_path}")
+        else:
+            click.echo(f"{'Cached:':<11}No")
+
+
+@main.command()
+@click.argument("names", nargs=-1, required=True)
+@click.option("--force", is_flag=True, help="Re-download even if cached")
+def pull(names: tuple[str, ...], force: bool) -> None:
+    """Cache dossiers locally for offline use.
+
+    Downloads dossiers from the registry and caches them in ~/.dossier/cache/.
+    Cached dossiers are used by 'dossier run' for faster execution.
+
+    NAMES can include version specifiers: 'myorg/deploy' or 'myorg/deploy@1.0.0'
+
+    \b
+    Examples:
+        dossier pull myorg/deploy
+        dossier pull myorg/deploy@1.0.0
+        dossier pull myorg/deploy myorg/backup --force
+    """
+    registry_url = get_registry_url()
+
+    for name in names:
+        dossier_name, version = parse_name_version(name)
+
+        try:
+            with get_client() as client:
+                # Resolve version if not specified
+                if version is None:
+                    click.echo(f"Pulling {dossier_name}...")
+                    click.echo("  Fetching metadata...", nl=False)
+                    metadata = client.get_dossier(dossier_name)
+                    version = metadata.get("version", "unknown")
+                    click.echo(f" v{version}")
+                else:
+                    click.echo(f"Pulling {dossier_name}@{version}...")
+
+                # Check if already cached
+                if not force and is_cached(dossier_name, version):
+                    click.echo(f"{dossier_name}@{version} already cached (use --force to re-download)")
+                    continue
+
+                # Download content
+                click.echo("  Downloading content...")
+                content, _ = client.pull_content(dossier_name, version=version)
+
+                # Cache the content
+                source_url = f"{registry_url}/api/v1/dossiers/{dossier_name}/content"
+                cache_path = cache_dossier(dossier_name, version, content, source_url)
+                click.echo(f"Cached: {cache_path}")
+
+        except RegistryError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+        except CacheError as e:
+            click.echo(f"Cache error: {e}", err=True)
+            sys.exit(1)
 
 
 @main.command()
 @click.argument("name")
-@click.option("-o", "--output", type=click.Path(path_type=Path), help="Output file")
-def pull(name: str, output: Path | None) -> None:
-    """Download a dossier from the registry."""
+@click.option("-o", "--output", type=click.Path(path_type=Path), help="Output file path")
+@click.option("--stdout", is_flag=True, help="Print to stdout instead of file")
+def export(name: str, output: Path | None, stdout: bool) -> None:
+    """Export a dossier to a local file.
+
+    Downloads a dossier from the registry and saves it to a file.
+    Use this when you want to customize or vendor a dossier.
+
+    NAME can include a version specifier: 'myorg/deploy' or 'myorg/deploy@1.0.0'
+
+    \b
+    Examples:
+        dossier export myorg/deploy
+        dossier export myorg/deploy -o ./workflows/deploy.ds.md
+        dossier export myorg/deploy --stdout
+    """
     dossier_name, version = parse_name_version(name)
 
     try:
@@ -90,15 +209,23 @@ def pull(name: str, output: Path | None) -> None:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
+    # Output to stdout if requested
+    if stdout:
+        click.echo(content)
+        return
+
     # Determine output path
     if output is None:
-        # Use last part of name as filename
+        # Use dossier name as filename
         filename = dossier_name.replace("/", "-") + ".ds.md"
         output = Path(filename)
 
+    # Create parent directories if needed
+    output.parent.mkdir(parents=True, exist_ok=True)
+
     # Write file
     output.write_text(content, encoding="utf-8")
-    click.echo(f"Downloaded: {output.resolve()}")
+    click.echo(f"Exported: {output.resolve()}")
 
     if digest:
         click.echo(f"Digest: {digest}")
@@ -277,65 +404,121 @@ def _is_inside_claude_code() -> bool:
     return os.environ.get("CLAUDECODE") == "1"
 
 
+def _get_from_cache(dossier_name: str, version: str | None) -> tuple[str | None, str | None, bool]:
+    """Try to get dossier content from cache.
+
+    Returns:
+        Tuple of (content, version, from_cache)
+    """
+    if version and is_cached(dossier_name, version):
+        content = read_cached(dossier_name, version)
+        if content:
+            return content, version, True
+
+    if not version:
+        cached = get_latest_cached(dossier_name)
+        if cached:
+            content = read_cached(dossier_name, cached.version)
+            if content:
+                click.echo(f"Using cached version {cached.version}")
+                return content, cached.version, True
+
+    return None, version, False
+
+
+def _fetch_from_registry(
+    dossier_name: str, version: str | None, do_cache: bool
+) -> tuple[str, str]:
+    """Fetch dossier content from registry.
+
+    Returns:
+        Tuple of (content, version)
+
+    Raises:
+        SystemExit on error
+    """
+    try:
+        with get_client() as client:
+            if version is None:
+                metadata = client.get_dossier(dossier_name)
+                version = metadata.get("version", "unknown")
+
+            content, _ = client.pull_content(dossier_name, version=version)
+
+            if do_cache:
+                registry_url = get_registry_url()
+                source_url = f"{registry_url}/api/v1/dossiers/{dossier_name}/content"
+                try:
+                    cache_path = cache_dossier(dossier_name, version, content, source_url)
+                    click.echo(f"Cached: {cache_path}")
+                except CacheError as e:
+                    click.echo(f"Warning: Could not cache: {e}", err=True)
+
+            return content, version
+
+    except RegistryError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
 @main.command()
 @click.argument("name")
+@click.option("--no-cache", "no_cache", is_flag=True, help="Skip cache, fetch from registry")
+@click.option("--pull", "do_pull", is_flag=True, help="Update cache before running")
 @click.option("--print-only", is_flag=True, help="Print the workflow content instead of running it")
-def run(name: str, print_only: bool) -> None:
+def run(name: str, no_cache: bool, do_pull: bool, print_only: bool) -> None:
     """Run a dossier workflow using Claude Code.
 
-    Pulls the workflow from the registry and starts an interactive Claude Code
-    session with the workflow as the initial prompt.
+    Uses cached dossiers when available. If not cached, fetches from registry.
 
     If already running inside Claude Code, prints the workflow content for the
     current session to execute instead of spawning a nested session.
 
     NAME can be 'workflow-name' or 'workflow-name@version'.
 
+    \b
+    Examples:
+        dossier run myorg/deploy           # Use cache if available
+        dossier run myorg/deploy --no-cache  # Always fetch from registry
+        dossier run myorg/deploy --pull    # Update cache and run
+
     Supported agents: Claude Code only (https://claude.ai/code)
     """
     inside_claude = _is_inside_claude_code()
-
-    # Check if claude is available (only needed if not inside Claude and not print-only)
     claude_path = shutil.which("claude")
+
     if not claude_path and not print_only and not inside_claude:
         click.echo("Error: Claude Code is not installed or not in PATH.", err=True)
-        click.echo("", err=True)
         click.echo("To install Claude Code, visit: https://claude.ai/code", err=True)
-        click.echo("", err=True)
-        click.echo("Note: Currently, only Claude Code is supported as an execution agent.", err=True)
         sys.exit(1)
 
-    # Pull the workflow from registry
     dossier_name, version = parse_name_version(name)
+    from_cache = False
 
-    try:
-        with get_client() as client:
-            content, _ = client.pull_content(dossier_name, version=version)
-    except RegistryError as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    # Get content from cache or registry
+    if no_cache or do_pull:
+        content, used_version = _fetch_from_registry(dossier_name, version, do_pull)
+    else:
+        content, used_version, from_cache = _get_from_cache(dossier_name, version)
+        if content is None:
+            content, used_version = _fetch_from_registry(dossier_name, version, do_cache=False)
 
-    # If print-only or inside Claude Code, just output the content
+    # Output content for print-only or inside Claude Code
     if print_only or inside_claude:
         if inside_claude and not print_only:
-            click.echo(f"Running workflow: {dossier_name}" + (f"@{version}" if version else ""))
+            source = "cached" if from_cache else "registry"
+            click.echo(f"Running workflow: {dossier_name}@{used_version} ({source})")
             click.echo()
         click.echo(content)
         return
 
     # Execute with Claude Code
-    click.echo(f"Running workflow: {dossier_name}" + (f"@{version}" if version else ""))
+    source = "cached" if from_cache else "registry"
+    click.echo(f"Running workflow: {dossier_name}@{used_version} ({source})")
     click.echo("Starting Claude Code...")
     click.echo()
 
-    # Start interactive Claude Code session with workflow as initial prompt
-    # claude_path is guaranteed to be set here (checked above)
-    # Use "--" to signal end of options, since content may start with "---"
-    result = subprocess.run(
-        [claude_path, "--", content],
-        check=False,
-    )
-
+    result = subprocess.run([claude_path, "--", content], check=False)
     sys.exit(result.returncode)
 
 

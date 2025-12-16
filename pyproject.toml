@@ -103,7 +103,7 @@ exclude = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "S105", "S106", "S310", "S110", "BLE001", "SIM105"]
+"tests/**/*.py" = ["S101", "S105", "S106", "S310", "S110", "BLE001", "SIM105", "PLR2004"]
 "**/cli.py" = ["FBT001", "PLR0913", "S603"]
 "**/cli/*.py" = ["FBT001", "PLR0913", "S603"]
 
