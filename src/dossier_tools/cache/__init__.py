@@ -92,15 +92,24 @@ def ensure_cache_dir() -> Path:
     return cache_dir
 
 
-def _validate_cache_name(name: str) -> None:
-    """Validate that a cache name doesn't contain path traversal attempts.
+def _validate_path_component(value: str, component_type: str) -> None:
+    """Validate that a path component doesn't contain path traversal attempts.
+
+    Args:
+        value: The value to validate (name or version)
+        component_type: Description for error message ('name' or 'version')
 
     Raises:
-        CacheError: If name contains dangerous path components.
+        CacheError: If value contains dangerous path components.
     """
     # Check for path traversal attempts
-    if ".." in name or name.startswith(("/", "~")):
-        msg = f"Invalid dossier name: {name}"
+    if ".." in value or value.startswith(("/", "~")):
+        msg = f"Invalid dossier {component_type}: {value}"
+        raise CacheError(msg)
+
+    # Version cannot contain slashes at all
+    if component_type == "version" and "/" in value:
+        msg = f"Invalid dossier {component_type}: {value}"
         raise CacheError(msg)
 
 
@@ -115,9 +124,10 @@ def get_cached_path(name: str, version: str) -> Path:
         Path like ~/.dossier/cache/myorg/deploy/1.0.0.ds.md
 
     Raises:
-        CacheError: If name contains path traversal attempts.
+        CacheError: If name or version contains path traversal attempts.
     """
-    _validate_cache_name(name)
+    _validate_path_component(name, "name")
+    _validate_path_component(version, "version")
     return get_cache_dir() / name / f"{version}.ds.md"
 
 
@@ -132,9 +142,10 @@ def get_meta_path(name: str, version: str) -> Path:
         Path like ~/.dossier/cache/myorg/deploy/1.0.0.meta.json
 
     Raises:
-        CacheError: If name contains path traversal attempts.
+        CacheError: If name or version contains path traversal attempts.
     """
-    _validate_cache_name(name)
+    _validate_path_component(name, "name")
+    _validate_path_component(version, "version")
     return get_cache_dir() / name / f"{version}.meta.json"
 
 

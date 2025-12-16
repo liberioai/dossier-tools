@@ -378,3 +378,31 @@ class TestPathTraversalProtection:
         get_cached_path("myorg/deploy", "1.0.0")
         get_cached_path("org/category/tool", "2.0.0")
         get_cached_path("simple", "1.0.0")
+
+    def test_rejects_version_with_path_traversal(self, tmp_path, monkeypatch):
+        """Should reject versions with '..' path traversal."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        with pytest.raises(CacheError, match="Invalid dossier version"):
+            get_cached_path("myorg/deploy", "../../../etc/passwd")
+
+    def test_rejects_version_with_absolute_path(self, tmp_path, monkeypatch):
+        """Should reject versions starting with '/'."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        with pytest.raises(CacheError, match="Invalid dossier version"):
+            get_cached_path("myorg/deploy", "/etc/passwd")
+
+    def test_rejects_version_with_home_expansion(self, tmp_path, monkeypatch):
+        """Should reject versions starting with '~'."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        with pytest.raises(CacheError, match="Invalid dossier version"):
+            get_cached_path("myorg/deploy", "~/.ssh/id_rsa")
+
+    def test_rejects_version_with_slash(self, tmp_path, monkeypatch):
+        """Should reject versions containing '/'."""
+        monkeypatch.setattr("dossier_tools.signing.keys.Path.home", lambda: tmp_path)
+
+        with pytest.raises(CacheError, match="Invalid dossier version"):
+            get_cached_path("myorg/deploy", "1.0.0/malicious")
