@@ -238,10 +238,7 @@ def is_cached(name: str, version: str) -> bool:
     Returns:
         True if both content and metadata files exist.
     """
-    return (
-        get_cached_path(name, version).exists()
-        and get_meta_path(name, version).exists()
-    )
+    return get_cached_path(name, version).exists() and get_meta_path(name, version).exists()
 
 
 def get_latest_cached(name: str) -> CachedDossier | None:
