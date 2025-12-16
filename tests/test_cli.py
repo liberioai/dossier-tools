@@ -12,11 +12,13 @@ from dossier_tools.signing import get_dossier_dir, get_private_key_path, get_pub
 from .conftest import FIXTURES_DIR
 
 # Test helper for cache metadata
-TEST_CACHE_META = json.dumps({
-    "cached_at": "2025-01-01T00:00:00Z",
-    "version": "1.0.0",
-    "source_registry_url": "test",
-})
+TEST_CACHE_META = json.dumps(
+    {
+        "cached_at": "2025-01-01T00:00:00Z",
+        "version": "1.0.0",
+        "source_registry_url": "test",
+    }
+)
 
 
 class TestCommandSections:

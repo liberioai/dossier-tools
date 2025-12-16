@@ -426,9 +426,7 @@ def _get_from_cache(dossier_name: str, version: str | None) -> tuple[str | None,
     return None, version, False
 
 
-def _fetch_from_registry(
-    dossier_name: str, version: str | None, do_cache: bool
-) -> tuple[str, str]:
+def _fetch_from_registry(dossier_name: str, version: str | None, do_cache: bool) -> tuple[str, str]:
     """Fetch dossier content from registry.
 
     Returns:
