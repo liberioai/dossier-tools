@@ -85,6 +85,67 @@ def list_cmd(category: str | None, show_url: bool, as_json: bool) -> None:
 
 
 @main.command()
+@click.argument("query")
+@click.option("-c", "--content", is_flag=True, help="Also search inside dossier content (slower)")
+@click.option("--limit", type=int, help="Maximum number of results")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def search(query: str, content: bool, limit: int | None, as_json: bool) -> None:
+    """Search dossiers by name, title, description, or content.
+
+    Searches dossier metadata (name, title, description, category, tags) by default.
+    Use --content to also search inside the dossier markdown body.
+
+    \b
+    Examples:
+        dossier search react
+        dossier search "setup project" --content
+        dossier search deploy --limit 5
+        dossier search kubernetes --json
+    """
+    from ..search import search_dossiers  # noqa: PLC0415
+
+    try:
+        with get_client() as client:
+            results = search_dossiers(
+                client=client,
+                query=query,
+                include_content=content,
+                limit=limit,
+            )
+    except RegistryError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    if as_json:
+        click.echo(json.dumps([r.to_dict() for r in results]))
+        return
+
+    if not results:
+        click.echo(f'No dossiers found matching "{query}".')
+        return
+
+    click.echo(f'Found {len(results)} dossier(s) matching "{query}":')
+    click.echo()
+
+    for r in results:
+        # Show match type indicator for content matches
+        match_indicator = " [content]" if r.match_type == "content" else ""
+        click.echo(f"  {r.name} (v{r.version}){match_indicator}")
+        click.echo(f"  {r.title}")
+
+        # Show tags if present
+        if r.tags:
+            click.echo(f"  [{', '.join(r.tags)}]")
+
+        # Show content context if available
+        for m in r.matches:
+            if m.field == "content" and m.context:
+                click.echo(f"  > {m.context}")
+
+        click.echo()
+
+
+@main.command()
 @click.argument("name")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def get(name: str, as_json: bool) -> None:
