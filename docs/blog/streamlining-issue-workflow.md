@@ -22,7 +22,7 @@ Two tools that work together:
 
 | Component | What it does | Where it lives |
 |-----------|--------------|----------------|
-| **Skill** | Natural language trigger | Local (`.claude/skills/`) |
+| **Skill** | Natural language trigger | User home (`~/.claude/skills/`) |
 | **Dossier** | Versioned workflow engine | Registry (shared) |
 
 - **Skills** teach Claude Code to respond to phrases like "start issue" or "work on issue #123"
@@ -38,14 +38,15 @@ A Claude Code skill is a markdown file that teaches Claude to respond to natural
 
 ### What is a Skill?
 
-- Lives in `.claude/skills/<skill-name>/SKILL.md`
+- Lives in `~/.claude/skills/<skill-name>/SKILL.md` (user-level, works across all projects)
+- Can also be project-specific at `.claude/skills/` if needed
 - Auto-discovered by Claude Code
 - The `description` field tells Claude when to trigger
 - The body contains instructions for what to do
 
 ### The Skill Content
 
-Create `.claude/skills/start-issue/SKILL.md`:
+Create `~/.claude/skills/start-issue/SKILL.md`:
 
 ```yaml
 ---
@@ -319,9 +320,11 @@ GitHub: [github.com/liberioai/dossier-tools](https://github.com/liberioai/dossie
 
 ### Step 2: Download the Skill File
 
+Install to your user-level skills directory (works across all projects):
+
 ```bash
-mkdir -p .claude/skills/start-issue
-curl -o .claude/skills/start-issue/SKILL.md \
+mkdir -p ~/.claude/skills/start-issue
+curl -o ~/.claude/skills/start-issue/SKILL.md \
   https://raw.githubusercontent.com/liberioai/dossier-tools/main/examples/skills/start-issue/SKILL.md
 ```
 
