@@ -17,7 +17,7 @@ Every time a developer starts work on a GitHub issue, they need to:
 
 ### The Skill (Trigger)
 
-**Location**: `.claude/skills/start-issue/SKILL.md`
+**Location**: `~/.claude/skills/start-issue/SKILL.md` (user-level, works across all projects)
 
 ```yaml
 ---

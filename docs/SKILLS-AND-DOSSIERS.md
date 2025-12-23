@@ -31,7 +31,7 @@ This document answers that question.
 │                    ▼                                                  │
 │   ┌─────────────────────────────┐                                    │
 │   │  SKILL (Local Trigger)      │  ← Natural language               │
-│   │  .claude/skills/start-issue │  ← Auto-discovery                 │
+│   │  ~/.claude/skills/start-issue│  ← Auto-discovery                 │
 │   └──────────────┬──────────────┘  ← Zero friction                  │
 │                  │                                                    │
 │                  ▼                                                    │
@@ -148,7 +148,7 @@ Same logic applies:
 
 ### The Skill (Trigger)
 
-`.claude/skills/start-issue/SKILL.md`:
+`~/.claude/skills/start-issue/SKILL.md`:
 
 ```yaml
 ---
