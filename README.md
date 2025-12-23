@@ -148,6 +148,9 @@ dossier publish workflow.ds.md --namespace myorg/tools
 ## Documentation
 
 - [What is a Dossier?](./docs/what-is-a-dossier.md) — Concept, use cases, and comparisons
+- [Skills and Dossiers](./docs/SKILLS-AND-DOSSIERS.md) — Why both matter and how they work together
+- [Use Case: Start Issue](./docs/USE-CASE-START-ISSUE.md) — Example skill + dossier workflow
+- [Blog: Streamlining Issue Workflow](./docs/blog/streamlining-issue-workflow.md) — Step-by-step tutorial
 - [CLI Reference](./docs/cli.md) — All commands and options
 - [Python API](./docs/api.md) — Using dossier-tools as a library
 - [Schema Reference](./docs/schema.md) — Frontmatter field reference
