@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -35,10 +36,42 @@ from . import display_metadata, main
 
 
 @main.command()
-def init() -> None:
-    """Initialize ~/.dossier directory."""
+@click.option("--skip-skills", is_flag=True, help="Skip installing recommended skills")
+def init(skip_skills: bool) -> None:
+    """Initialize dossier and install recommended Claude Code skills.
+
+    Creates the ~/.dossier directory and optionally installs recommended
+    skills for Claude Code integration.
+
+    \b
+    Examples:
+        dossier init              # Initialize and install skills
+        dossier init --skip-skills  # Initialize without skills
+    """
     dossier_dir = ensure_dossier_dir()
     click.echo(f"Initialized dossier directory: {dossier_dir}")
+
+    if not skip_skills:
+        click.echo()
+        _install_recommended_skills()
+
+
+def _install_recommended_skills() -> None:
+    """Install recommended Claude Code skills."""
+    from .registry import DISCOVERY_SKILL, DISCOVERY_SKILL_NAME, install_skill  # noqa: PLC0415
+
+    skill_path = Path.home() / ".claude" / "skills" / DISCOVERY_SKILL_NAME / "SKILL.md"
+
+    if skill_path.exists():
+        click.echo(f"Skill '{DISCOVERY_SKILL_NAME}' is already installed.")
+        return
+
+    click.echo("Installing recommended skills...")
+    click.echo()
+
+    ctx = click.get_current_context()
+    with contextlib.suppress(SystemExit):
+        ctx.invoke(install_skill, name=DISCOVERY_SKILL, force=False)
 
 
 @main.command("generate-keys")
