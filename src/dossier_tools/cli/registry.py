@@ -243,6 +243,45 @@ def pull(names: tuple[str, ...], force: bool) -> None:
             sys.exit(1)
 
 
+def _fetch_and_save_dossier(name: str, output: Path, *, verbose: bool = False) -> tuple[str | None, str | None]:
+    """Fetch a dossier from registry and save to output path.
+
+    Args:
+        name: Dossier name, optionally with @version suffix
+        output: Path to write the file to
+        verbose: Whether to resolve and print version info (keyword-only)
+
+    Returns:
+        Tuple of (resolved_version, digest). Version may be None if not resolved.
+
+    Raises:
+        SystemExit on error
+    """
+    dossier_name, version = parse_name_version(name)
+
+    try:
+        with get_client() as client:
+            # Only resolve version when verbose - otherwise let server use latest
+            if verbose and version is None:
+                click.echo(f"Fetching {dossier_name}...")
+                metadata = client.get_dossier(dossier_name)
+                version = metadata.get("version", "unknown")
+                click.echo(f"  Found version: {version}")
+
+            content, digest = client.pull_content(dossier_name, version=version)
+    except RegistryError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    # Create parent directories if needed
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write file
+    output.write_text(content, encoding="utf-8")
+
+    return version, digest
+
+
 @main.command()
 @click.argument("name")
 @click.option("-o", "--output", type=click.Path(path_type=Path), help="Output file path")
@@ -263,33 +302,66 @@ def export(name: str, output: Path | None, stdout: bool) -> None:
     """
     dossier_name, version = parse_name_version(name)
 
-    try:
-        with get_client() as client:
-            content, digest = client.pull_content(dossier_name, version=version)
-    except RegistryError as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
-    # Output to stdout if requested
+    # Output to stdout - need to fetch directly
     if stdout:
+        try:
+            with get_client() as client:
+                content, _ = client.pull_content(dossier_name, version=version)
+        except RegistryError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
         click.echo(content)
         return
 
     # Determine output path
     if output is None:
-        # Use dossier name as filename
         filename = dossier_name.replace("/", "-") + ".ds.md"
         output = Path(filename)
 
-    # Create parent directories if needed
-    output.parent.mkdir(parents=True, exist_ok=True)
+    version, digest = _fetch_and_save_dossier(name, output, verbose=False)
 
-    # Write file
-    output.write_text(content, encoding="utf-8")
     click.echo(f"Exported: {output.resolve()}")
-
     if digest:
         click.echo(f"Digest: {digest}")
+
+
+@main.command("install-skill")
+@click.argument("name")
+@click.option("--force", is_flag=True, help="Overwrite if skill already exists")
+def install_skill(name: str, force: bool) -> None:
+    """Install a Claude Code skill from the registry.
+
+    Downloads a dossier from the registry and installs it as a Claude Code skill
+    at ~/.claude/skills/<skill-name>/SKILL.md.
+
+    NAME can include a version specifier: 'myorg/skill-name' or 'myorg/skill-name@1.0.0'
+
+    \b
+    Examples:
+        dossier install-skill imboard-ai/skills/start-issue
+        dossier install-skill myorg/skills/review-pr@1.0.0
+        dossier install-skill myorg/skills/deploy --force
+    """
+    dossier_name, _ = parse_name_version(name)
+
+    # Extract skill name from dossier name (last part of the path)
+    skill_name = dossier_name.split("/")[-1]
+
+    # Target path: ~/.claude/skills/<skill-name>/SKILL.md
+    skill_file = Path.home() / ".claude" / "skills" / skill_name / "SKILL.md"
+
+    # Check if skill already exists
+    if skill_file.exists() and not force:
+        click.echo(f"Skill '{skill_name}' already exists at {skill_file}", err=True)
+        click.echo("Use --force to overwrite.", err=True)
+        sys.exit(1)
+
+    version, _ = _fetch_and_save_dossier(name, skill_file, verbose=True)
+
+    click.echo()
+    version_str = f" (v{version})" if version else ""
+    click.echo(f"Installed skill '{skill_name}'{version_str} to:")
+    click.echo(f"  {skill_file}")
 
 
 @main.command()
