@@ -16,7 +16,10 @@ COMMAND_SECTIONS: dict[str, list[str]] = OrderedDict(
         ("Local Commands", ["init", "generate-keys", "from-file", "validate", "checksum", "sign", "verify", "info"]),
         (
             "Registry Commands",
-            ["list", "search", "get", "pull", "export", "publish", "remove", "login", "logout", "whoami"],
+            [
+                "list", "search", "get", "pull", "export", "publish",
+                "remove", "install-skill", "login", "logout", "whoami",
+            ],
         ),
         ("Cache Commands", ["cache"]),
         ("Execution Commands", ["run", "new"]),

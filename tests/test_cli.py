@@ -1054,6 +1054,119 @@ class TestExport:
         assert content in result.output
 
 
+class TestInstallSkill:
+    """Tests for install-skill command."""
+
+    @respx.mock
+    def test_install_skill_success(self, tmp_path, monkeypatch):
+        """Should install skill to ~/.claude/skills/<name>/SKILL.md."""
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        content = "---\ntitle: Start Issue\n---\n# Start Issue Workflow"
+        # Mock version resolution
+        respx.get("https://registry.test/api/v1/dossiers/imboard-ai/skills/start-issue").mock(
+            return_value=Response(200, json={"version": "1.0.0"})
+        )
+        respx.get("https://registry.test/api/v1/dossiers/imboard-ai/skills/start-issue/content").mock(
+            return_value=Response(200, text=content, headers={})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["install-skill", "imboard-ai/skills/start-issue"])
+
+        assert result.exit_code == 0
+        assert "Installed skill 'start-issue'" in result.output
+        assert "(v1.0.0)" in result.output
+
+        skill_file = tmp_path / ".claude" / "skills" / "start-issue" / "SKILL.md"
+        assert skill_file.exists()
+        assert skill_file.read_text() == content
+
+    @respx.mock
+    def test_install_skill_already_exists(self, tmp_path, monkeypatch):
+        """Should fail if skill already exists without --force."""
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        # Create existing skill
+        skill_dir = tmp_path / ".claude" / "skills" / "start-issue"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("existing content")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["install-skill", "imboard-ai/skills/start-issue"])
+
+        assert result.exit_code == 1
+        assert "already exists" in result.output
+        assert "--force" in result.output
+
+    @respx.mock
+    def test_install_skill_force_overwrite(self, tmp_path, monkeypatch):
+        """Should overwrite existing skill with --force."""
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        # Create existing skill
+        skill_dir = tmp_path / ".claude" / "skills" / "start-issue"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("old content")
+
+        new_content = "---\ntitle: Updated\n---\n# Updated content"
+        respx.get("https://registry.test/api/v1/dossiers/myorg/skills/start-issue").mock(
+            return_value=Response(200, json={"version": "2.0.0"})
+        )
+        respx.get("https://registry.test/api/v1/dossiers/myorg/skills/start-issue/content").mock(
+            return_value=Response(200, text=new_content, headers={})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["install-skill", "myorg/skills/start-issue", "--force"])
+
+        assert result.exit_code == 0
+        assert "Installed skill 'start-issue'" in result.output
+
+        skill_file = skill_dir / "SKILL.md"
+        assert skill_file.read_text() == new_content
+
+    @respx.mock
+    def test_install_skill_with_version(self, tmp_path, monkeypatch):
+        """Should install specific version when specified."""
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        content = "---\ntitle: Skill v1.2.0\n---\n# Content"
+        # No version resolution needed when version is specified
+        respx.get("https://registry.test/api/v1/dossiers/myorg/my-skill/content").mock(
+            return_value=Response(200, text=content, headers={})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["install-skill", "myorg/my-skill@1.2.0"])
+
+        assert result.exit_code == 0
+        assert "Installed skill 'my-skill'" in result.output
+
+        skill_file = tmp_path / ".claude" / "skills" / "my-skill" / "SKILL.md"
+        assert skill_file.exists()
+
+    @respx.mock
+    def test_install_skill_registry_error(self, tmp_path, monkeypatch):
+        """Should handle registry errors gracefully."""
+        monkeypatch.setenv("DOSSIER_REGISTRY_URL", "https://registry.test")
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        respx.get("https://registry.test/api/v1/dossiers/myorg/nonexistent").mock(
+            return_value=Response(404, json={"error": {"message": "Dossier not found"}})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["install-skill", "myorg/nonexistent"])
+
+        assert result.exit_code == 1
+        assert "Error" in result.output
+
+
 class TestCacheCommands:
     """Tests for cache subcommands."""
 
