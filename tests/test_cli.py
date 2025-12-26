@@ -25,9 +25,12 @@ class TestCommandSections:
     """Tests for CLI command organization."""
 
     def test_all_commands_in_sections(self):
-        """All commands should be listed in COMMAND_SECTIONS for help display."""
-        # Get all registered commands
-        registered_commands = set(main.commands.keys())
+        """All non-hidden commands should be listed in COMMAND_SECTIONS for help display."""
+        # Get all registered commands (excluding hidden ones)
+        registered_commands = {
+            name for name, cmd in main.commands.items()
+            if not getattr(cmd, "hidden", False)
+        }
 
         # Get all commands listed in sections
         sectioned_commands = set()
@@ -1904,3 +1907,209 @@ test""")
 
         assert result.exit_code == 0
         assert "Warning" not in result.output
+
+
+class TestClaudeHooks:
+    """Tests for Claude Code hook installation and removal."""
+
+    def test_install_hook_creates_settings_file(self, tmp_path, monkeypatch):
+        """Should create settings file if it doesn't exist."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        from dossier_tools.cli.local import install_claude_hook
+
+        result = install_claude_hook()
+
+        assert result is True
+        settings_path = tmp_path / ".claude" / "settings.json"
+        assert settings_path.exists()
+
+        settings = json.loads(settings_path.read_text())
+        assert "hooks" in settings
+        assert "UserPromptSubmit" in settings["hooks"]
+        assert len(settings["hooks"]["UserPromptSubmit"]) == 1
+
+    def test_install_hook_adds_to_existing_settings(self, tmp_path, monkeypatch):
+        """Should add hook to existing settings without overwriting."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        # Create existing settings
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir(parents=True)
+        settings_path = settings_dir / "settings.json"
+        settings_path.write_text(json.dumps({"existingKey": "existingValue"}))
+
+        from dossier_tools.cli.local import install_claude_hook
+
+        result = install_claude_hook()
+
+        assert result is True
+        settings = json.loads(settings_path.read_text())
+        assert settings["existingKey"] == "existingValue"
+        assert "hooks" in settings
+
+    def test_install_hook_preserves_existing_hooks(self, tmp_path, monkeypatch):
+        """Should preserve existing hooks when adding new one."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        # Create existing settings with hooks
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir(parents=True)
+        settings_path = settings_dir / "settings.json"
+        existing_hook = {"id": "other-hook", "hooks": [{"type": "command", "command": "echo other"}]}
+        settings_path.write_text(json.dumps({"hooks": {"UserPromptSubmit": [existing_hook]}}))
+
+        from dossier_tools.cli.local import install_claude_hook
+
+        result = install_claude_hook()
+
+        assert result is True
+        settings = json.loads(settings_path.read_text())
+        assert len(settings["hooks"]["UserPromptSubmit"]) == 2
+
+    def test_install_hook_returns_false_if_exists(self, tmp_path, monkeypatch):
+        """Should return False if hook already exists."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        from dossier_tools.cli.local import DOSSIER_HOOK_ID, install_claude_hook
+
+        # Install hook first time
+        install_claude_hook()
+
+        # Try to install again
+        result = install_claude_hook()
+
+        assert result is False
+
+        # Verify only one hook exists
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text())
+        matching_hooks = [h for h in settings["hooks"]["UserPromptSubmit"] if h.get("id") == DOSSIER_HOOK_ID]
+        assert len(matching_hooks) == 1
+
+    def test_remove_hook_removes_hook(self, tmp_path, monkeypatch):
+        """Should remove hook and return True."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        from dossier_tools.cli.local import install_claude_hook, remove_claude_hook
+
+        # Install hook first
+        install_claude_hook()
+
+        # Remove it
+        result = remove_claude_hook()
+
+        assert result is True
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text())
+        assert len(settings["hooks"]["UserPromptSubmit"]) == 0
+
+    def test_remove_hook_preserves_other_hooks(self, tmp_path, monkeypatch):
+        """Should only remove dossier hook, not other hooks."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        from dossier_tools.cli.local import install_claude_hook, remove_claude_hook
+
+        # Create settings with another hook
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir(parents=True)
+        settings_path = settings_dir / "settings.json"
+        other_hook = {"id": "other-hook", "hooks": [{"type": "command", "command": "echo other"}]}
+        settings_path.write_text(json.dumps({"hooks": {"UserPromptSubmit": [other_hook]}}))
+
+        # Install dossier hook
+        install_claude_hook()
+
+        # Remove dossier hook
+        result = remove_claude_hook()
+
+        assert result is True
+        settings = json.loads(settings_path.read_text())
+        assert len(settings["hooks"]["UserPromptSubmit"]) == 1
+        assert settings["hooks"]["UserPromptSubmit"][0]["id"] == "other-hook"
+
+    def test_remove_hook_returns_false_if_not_found(self, tmp_path, monkeypatch):
+        """Should return False if hook doesn't exist."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        from dossier_tools.cli.local import remove_claude_hook
+
+        result = remove_claude_hook()
+
+        assert result is False
+
+    def test_remove_hook_handles_missing_settings_file(self, tmp_path, monkeypatch):
+        """Should return False if settings file doesn't exist."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        from dossier_tools.cli.local import remove_claude_hook
+
+        result = remove_claude_hook()
+
+        assert result is False
+
+    def test_init_installs_hook(self, tmp_path, monkeypatch):
+        """Init command should install hook by default."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        result = runner.invoke(main, ["init"])
+
+        assert result.exit_code == 0
+        assert "Installed dossier discovery hook" in result.output
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        assert settings_path.exists()
+
+    def test_init_skip_hooks(self, tmp_path, monkeypatch):
+        """Init with --skip-hooks should not install hook."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        result = runner.invoke(main, ["init", "--skip-hooks"])
+
+        assert result.exit_code == 0
+        assert "Installed dossier discovery hook" not in result.output
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        assert not settings_path.exists()
+
+    def test_init_hook_already_installed(self, tmp_path, monkeypatch):
+        """Init should show message if hook already installed."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        # Run init twice
+        runner.invoke(main, ["init"])
+        result = runner.invoke(main, ["init"])
+
+        assert result.exit_code == 0
+        assert "already installed" in result.output
+
+    def test_reset_hooks_removes_hook(self, tmp_path, monkeypatch):
+        """Reset-hooks command should remove hook."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        # Install hook first
+        runner.invoke(main, ["init"])
+
+        # Reset hooks
+        result = runner.invoke(main, ["reset-hooks"])
+
+        assert result.exit_code == 0
+        assert "Removed dossier discovery hook" in result.output
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text())
+        assert len(settings["hooks"]["UserPromptSubmit"]) == 0
+
+    def test_reset_hooks_not_found(self, tmp_path, monkeypatch):
+        """Reset-hooks should show message if no hook found."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        runner = CliRunner()
+
+        result = runner.invoke(main, ["reset-hooks"])
+
+        assert result.exit_code == 0
+        assert "No dossier hook found" in result.output
