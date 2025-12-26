@@ -13,7 +13,10 @@ from ..logging import configure_logging
 # Command categories for help organization
 COMMAND_SECTIONS: dict[str, list[str]] = OrderedDict(
     [
-        ("Local Commands", ["init", "generate-keys", "from-file", "validate", "checksum", "sign", "verify", "info"]),
+        (
+            "Local Commands",
+            ["init", "reset-hooks", "generate-keys", "from-file", "validate", "checksum", "sign", "verify", "info"],
+        ),
         (
             "Registry Commands",
             [
