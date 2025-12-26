@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import getpass
 import http
 import json
 import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -40,77 +38,6 @@ from ..registry import (
     run_oauth_flow,
 )
 from . import display_metadata, main
-
-# The dossier-discovery skill to suggest on first run
-DISCOVERY_SKILL = "imboard-ai/skills/dossier-discovery"
-DISCOVERY_SKILL_NAME = "dossier-discovery"
-
-
-def _get_dossier_config_dir() -> Path:
-    """Get the dossier config directory (~/.dossier/)."""
-    return Path.home() / ".dossier"
-
-
-def _is_discovery_skill_installed() -> bool:
-    """Check if the dossier-discovery skill is installed."""
-    skill_path = Path.home() / ".claude" / "skills" / DISCOVERY_SKILL_NAME / "SKILL.md"
-    return skill_path.exists()
-
-
-def _get_discovery_prompt_file() -> Path:
-    """Get the path to the discovery skill prompt record file."""
-    return _get_dossier_config_dir() / "discovery_skill_prompt.json"
-
-
-def _has_prompted_for_discovery() -> bool:
-    """Check if we've already prompted for the discovery skill."""
-    prompt_file = _get_discovery_prompt_file()
-    return prompt_file.exists()
-
-
-def _record_discovery_prompt(accepted: bool) -> None:
-    """Record the user's response to the discovery skill prompt.
-
-    Args:
-        accepted: Whether the user accepted the prompt to install
-    """
-    config_dir = _get_dossier_config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-
-    prompt_record = {
-        "skill": DISCOVERY_SKILL,
-        "prompt": "Install the 'dossier-discovery' skill for proactive workflow suggestions?",
-        "response": "yes" if accepted else "no",
-        "user": getpass.getuser(),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-    prompt_file = _get_discovery_prompt_file()
-    prompt_file.write_text(json.dumps(prompt_record, indent=2), encoding="utf-8")
-
-
-def _prompt_for_discovery_skill() -> None:
-    """Prompt user to install the dossier-discovery skill on first run."""
-    if _is_discovery_skill_installed() or _has_prompted_for_discovery():
-        return
-
-    click.echo()
-    click.echo("Tip: Install the 'dossier-discovery' skill for proactive workflow suggestions.")
-    click.echo("This skill helps find relevant dossiers when you start complex tasks.")
-    click.echo()
-
-    accepted = click.confirm("Install it now?")
-
-    if accepted:
-        click.echo()
-        # Get the current context and invoke install_skill
-        ctx = click.get_current_context()
-        ctx.invoke(install_skill, name=DISCOVERY_SKILL, force=False)
-    else:
-        click.echo("You can install it later with: dossier init")
-        click.echo()
-
-    _record_discovery_prompt(accepted)
 
 
 @main.command("list")
@@ -688,10 +615,6 @@ def run(name: str, no_cache: bool, do_pull: bool, print_only: bool) -> None:
 
     Supported agents: Claude Code only (https://claude.ai/code)
     """
-    # Prompt to install dossier-discovery skill on first run
-    if not print_only:
-        _prompt_for_discovery_skill()
-
     inside_claude = _is_inside_claude_code()
     claude_path = shutil.which("claude")
 
