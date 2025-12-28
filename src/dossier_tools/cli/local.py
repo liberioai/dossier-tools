@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import sys
 from pathlib import Path
@@ -34,44 +33,283 @@ from ..signing import (
 from ..signing.ed25519 import Ed25519Signer
 from . import display_metadata, main
 
+# Hook configuration for automatic dossier discovery in Claude Code
+# Pattern to match workflow-related prompts
+DOSSIER_HOOK_PATTERN = (
+    r"(?i)(workflow|setup|deploy|migrate|refactor|ci[/-]?cd|pipeline|"
+    r"create.*(script|automation|process)|sync.*worktree|onboard|initialize|configure)"
+)
+
+# Command that reads prompt from stdin and conditionally outputs dossier list
+DOSSIER_HOOK_COMMAND = "dossier prompt-hook"
+
+# Unique identifier to find our hook (since we can't use matcher)
+DOSSIER_HOOK_ID = "dossier-discovery-hook"
+
+
+def install_claude_hook() -> bool:
+    """Install UserPromptSubmit hook for automatic dossier discovery.
+
+    This hook injects available dossiers as context when users ask about
+    workflow-related tasks, helping Claude suggest relevant dossiers.
+
+    Note: Hooks must be in settings.json (not settings.local.json) to work.
+
+    Returns:
+        True if hook was installed, False if already exists
+    """
+    settings_path = Path.home() / ".claude" / "settings.json"
+
+    # Load existing settings or create new
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            settings = {}
+    else:
+        settings = {}
+
+    # Ensure hooks structure exists
+    if "hooks" not in settings:
+        settings["hooks"] = {}
+    if "UserPromptSubmit" not in settings["hooks"]:
+        settings["hooks"]["UserPromptSubmit"] = []
+
+    # Define the dossier discovery hook (no matcher - UserPromptSubmit doesn't support it)
+    # The filtering is done inside the prompt-hook command
+    dossier_hook = {
+        "id": DOSSIER_HOOK_ID,
+        "hooks": [{"type": "command", "command": DOSSIER_HOOK_COMMAND}],
+    }
+
+    # Check if hook already exists (by id)
+    existing_hooks = settings["hooks"]["UserPromptSubmit"]
+    for hook in existing_hooks:
+        if hook.get("id") == DOSSIER_HOOK_ID:
+            return False  # Already installed
+
+    # Add the hook
+    existing_hooks.append(dossier_hook)
+
+    # Write back with proper formatting
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+
+    return True
+
+
+def remove_claude_hook() -> bool:
+    """Remove the dossier discovery hook from Claude settings.
+
+    Returns:
+        True if hook was removed, False if not found
+    """
+    settings_path = Path.home() / ".claude" / "settings.json"
+
+    if not settings_path.exists():
+        return False
+
+    try:
+        settings = json.loads(settings_path.read_text())
+    except json.JSONDecodeError:
+        return False
+
+    if "hooks" not in settings or "UserPromptSubmit" not in settings["hooks"]:
+        return False
+
+    original_count = len(settings["hooks"]["UserPromptSubmit"])
+    settings["hooks"]["UserPromptSubmit"] = [
+        hook for hook in settings["hooks"]["UserPromptSubmit"] if hook.get("id") != DOSSIER_HOOK_ID
+    ]
+
+    if len(settings["hooks"]["UserPromptSubmit"]) < original_count:
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+        return True
+
+    return False
+
 
 @main.command()
-@click.option("--skip-skills", is_flag=True, help="Skip installing recommended skills")
-def init(skip_skills: bool) -> None:
-    """Initialize dossier and install recommended Claude Code skills.
+@click.option("--skip-hooks", is_flag=True, help="Skip installing Claude Code hooks")
+def init(skip_hooks: bool) -> None:
+    """Initialize dossier and install Claude Code discovery hook.
 
-    Creates the ~/.dossier directory and optionally installs recommended
-    skills for Claude Code integration.
+    Creates the ~/.dossier directory and installs the discovery hook
+    for Claude Code integration.
+
+    The discovery hook automatically shows available dossiers when you ask
+    Claude about workflow-related tasks (setup, deploy, migrate, etc.).
 
     \b
     Examples:
-        dossier init              # Initialize and install skills
-        dossier init --skip-skills  # Initialize without skills
+        dossier init              # Initialize and install hook
+        dossier init --skip-hooks # Initialize without hook
     """
     dossier_dir = ensure_dossier_dir()
     click.echo(f"Initialized dossier directory: {dossier_dir}")
 
-    if not skip_skills:
+    if not skip_hooks:
         click.echo()
-        _install_recommended_skills()
+        if install_claude_hook():
+            click.echo("Installed dossier discovery hook for Claude Code")
+            click.echo("  Hook triggers on: workflow, setup, deploy, migrate, refactor, CI/CD, etc.")
+        else:
+            click.echo("Dossier discovery hook already installed")
 
 
-def _install_recommended_skills() -> None:
-    """Install recommended Claude Code skills."""
-    from .registry import DISCOVERY_SKILL, DISCOVERY_SKILL_NAME, install_skill  # noqa: PLC0415
+@main.command("reset-hooks")
+def reset_hooks() -> None:
+    """Remove dossier hooks from Claude Code settings.
 
-    skill_path = Path.home() / ".claude" / "skills" / DISCOVERY_SKILL_NAME / "SKILL.md"
+    Removes the dossier discovery hook that was installed by 'dossier init'.
+    Use this if you want to disable automatic dossier suggestions.
 
-    if skill_path.exists():
-        click.echo(f"Skill '{DISCOVERY_SKILL_NAME}' is already installed.")
-        return
+    \b
+    Examples:
+        dossier reset-hooks  # Remove the discovery hook
+    """
+    if remove_claude_hook():
+        click.echo("Removed dossier discovery hook from Claude Code settings")
+    else:
+        click.echo("No dossier hook found to remove")
 
-    click.echo("Installing recommended skills...")
+
+# Cache TTL for dossier list (5 minutes)
+DOSSIER_LIST_CACHE_TTL_SECONDS = 300
+
+
+def _get_dossier_list_cache_path() -> Path:
+    """Get path to the dossier list cache file."""
+    return Path.home() / ".dossier" / "dossier-list-cache.json"
+
+
+def _get_cached_dossier_list() -> list[dict[str, Any]] | None:
+    """Get dossier list from cache if fresh.
+
+    Returns:
+        List of dossiers if cache is valid, None otherwise.
+    """
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    cache_path = _get_dossier_list_cache_path()
+    if not cache_path.exists():
+        return None
+
+    try:
+        cache_data = json.loads(cache_path.read_text())
+        cached_at = datetime.fromisoformat(cache_data.get("cached_at", ""))
+        age_seconds = (datetime.now(timezone.utc) - cached_at).total_seconds()
+
+        if age_seconds < DOSSIER_LIST_CACHE_TTL_SECONDS:
+            return cache_data.get("dossiers", [])
+    except (json.JSONDecodeError, ValueError, OSError):
+        pass
+
+    return None
+
+
+def _cache_dossier_list(dossiers: list[dict[str, Any]]) -> None:
+    """Cache the dossier list to disk."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    cache_path = _get_dossier_list_cache_path()
+    cache_data = {
+        "cached_at": datetime.now(timezone.utc).isoformat(),
+        "dossiers": dossiers,
+    }
+
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(cache_data))
+    except OSError:
+        pass  # Ignore cache write errors
+
+
+def _fetch_all_dossiers_for_hook() -> list[dict[str, Any]]:
+    """Fetch all dossiers with caching and pagination support.
+
+    Returns:
+        List of all dossiers, or empty list on error.
+    """
+    # Try cache first
+    cached = _get_cached_dossier_list()
+    if cached is not None:
+        return cached
+
+    # Fetch from registry with pagination
+    from ..registry import RegistryError, get_client  # noqa: PLC0415
+
+    try:
+        all_dossiers: list[dict[str, Any]] = []
+        page = 1
+        per_page = 100
+
+        with get_client() as client:
+            while True:
+                result = client.list_dossiers(page=page, per_page=per_page)
+                dossiers = result.get("dossiers", [])
+                all_dossiers.extend(dossiers)
+
+                pagination = result.get("pagination", {})
+                total = pagination.get("total", 0)
+
+                if len(all_dossiers) >= total or not dossiers:
+                    break
+
+                page += 1
+
+    except RegistryError:
+        return []
+    else:
+        # Cache the results
+        _cache_dossier_list(all_dossiers)
+        return all_dossiers
+
+
+@main.command("prompt-hook", hidden=True)
+def prompt_hook() -> None:
+    """Hook command for Claude Code UserPromptSubmit integration.
+
+    Reads JSON from stdin (with 'prompt' field), checks if prompt matches
+    workflow-related keywords, and outputs available dossiers if matched.
+
+    This command is designed to be called by Claude Code hooks, not directly.
+    """
+    import re  # noqa: PLC0415
+
+    # Read JSON from stdin
+    try:
+        stdin_data = sys.stdin.read()
+        if not stdin_data.strip():
+            return  # No input, exit silently
+        data = json.loads(stdin_data)
+    except (json.JSONDecodeError, OSError):
+        return  # Invalid input, exit silently
+
+    prompt = data.get("prompt", "")
+    if not prompt:
+        return  # No prompt, exit silently
+
+    # Check if prompt matches our workflow-related pattern
+    if not re.search(DOSSIER_HOOK_PATTERN, prompt):
+        return  # No match, exit silently
+
+    # Prompt matches - fetch and display dossiers (with caching)
+    dossiers = _fetch_all_dossiers_for_hook()
+
+    if not dossiers:
+        return  # No dossiers available
+
+    # Output formatted dossier list
+    click.echo("## Available Dossier Workflows")
     click.echo()
-
-    ctx = click.get_current_context()
-    with contextlib.suppress(SystemExit):
-        ctx.invoke(install_skill, name=DISCOVERY_SKILL, force=False)
+    click.echo("Consider using one of these dossiers for your task:")
+    for dossier in sorted(dossiers, key=lambda d: d.get("name", ""))[:15]:
+        name = dossier.get("name", "unknown")
+        title = dossier.get("title", "Untitled")
+        click.echo(f"- **{name}**: {title}")
+    click.echo()
+    click.echo("Use `dossier run <name>` to execute a workflow.")
 
 
 @main.command("generate-keys")
