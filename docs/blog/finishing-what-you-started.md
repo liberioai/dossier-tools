@@ -2,6 +2,9 @@
 
 *This is the companion post to [Streamlining Your Issue Workflow](./streamlining-issue-workflow.md). That one covers starting an issue. This one covers finishing it.*
 
+> [!NOTE]
+> **This workflow is just one example.** Your team may have different requirements. See [Build Your Own Workflow](./build-your-own-workflow.md) to learn how to create workflows tailored to your needs.
+
 ---
 
 You've written the code. Tests pass (locally). Time to create a PR.
