@@ -1,5 +1,8 @@
 # Streamlining Your Issue Workflow with Skills and Dossiers
 
+> [!NOTE]
+> **This workflow is just one example.** Your team may have different conventions. See [Build Your Own Workflow](./build-your-own-workflow.md) to learn how to create workflows tailored to your needs.
+
 You pick up a new issue. Before writing a single line of code, you're:
 
 - Tab-switching to GitHub to grab the issue title
