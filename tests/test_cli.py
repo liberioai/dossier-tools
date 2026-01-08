@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from httpx import Response
 
 from dossier_tools.cli import COMMAND_SECTIONS, main
+from dossier_tools.cli.local import DOSSIER_HOOK_ID, install_claude_hook, remove_claude_hook
 from dossier_tools.signing import get_dossier_dir, get_private_key_path, get_public_key_path
 
 from .conftest import FIXTURES_DIR
@@ -27,10 +28,7 @@ class TestCommandSections:
     def test_all_commands_in_sections(self):
         """All non-hidden commands should be listed in COMMAND_SECTIONS for help display."""
         # Get all registered commands (excluding hidden ones)
-        registered_commands = {
-            name for name, cmd in main.commands.items()
-            if not getattr(cmd, "hidden", False)
-        }
+        registered_commands = {name for name, cmd in main.commands.items() if not getattr(cmd, "hidden", False)}
 
         # Get all commands listed in sections
         sectioned_commands = set()
@@ -1916,8 +1914,6 @@ class TestClaudeHooks:
         """Should create settings file if it doesn't exist."""
         monkeypatch.setenv("HOME", str(tmp_path))
 
-        from dossier_tools.cli.local import install_claude_hook
-
         result = install_claude_hook()
 
         assert result is True
@@ -1939,8 +1935,6 @@ class TestClaudeHooks:
         settings_path = settings_dir / "settings.json"
         settings_path.write_text(json.dumps({"existingKey": "existingValue"}))
 
-        from dossier_tools.cli.local import install_claude_hook
-
         result = install_claude_hook()
 
         assert result is True
@@ -1959,8 +1953,6 @@ class TestClaudeHooks:
         existing_hook = {"id": "other-hook", "hooks": [{"type": "command", "command": "echo other"}]}
         settings_path.write_text(json.dumps({"hooks": {"UserPromptSubmit": [existing_hook]}}))
 
-        from dossier_tools.cli.local import install_claude_hook
-
         result = install_claude_hook()
 
         assert result is True
@@ -1970,8 +1962,6 @@ class TestClaudeHooks:
     def test_install_hook_returns_false_if_exists(self, tmp_path, monkeypatch):
         """Should return False if hook already exists."""
         monkeypatch.setenv("HOME", str(tmp_path))
-
-        from dossier_tools.cli.local import DOSSIER_HOOK_ID, install_claude_hook
 
         # Install hook first time
         install_claude_hook()
@@ -1991,8 +1981,6 @@ class TestClaudeHooks:
         """Should remove hook and return True."""
         monkeypatch.setenv("HOME", str(tmp_path))
 
-        from dossier_tools.cli.local import install_claude_hook, remove_claude_hook
-
         # Install hook first
         install_claude_hook()
 
@@ -2007,8 +1995,6 @@ class TestClaudeHooks:
     def test_remove_hook_preserves_other_hooks(self, tmp_path, monkeypatch):
         """Should only remove dossier hook, not other hooks."""
         monkeypatch.setenv("HOME", str(tmp_path))
-
-        from dossier_tools.cli.local import install_claude_hook, remove_claude_hook
 
         # Create settings with another hook
         settings_dir = tmp_path / ".claude"
@@ -2032,8 +2018,6 @@ class TestClaudeHooks:
         """Should return False if hook doesn't exist."""
         monkeypatch.setenv("HOME", str(tmp_path))
 
-        from dossier_tools.cli.local import remove_claude_hook
-
         result = remove_claude_hook()
 
         assert result is False
@@ -2041,8 +2025,6 @@ class TestClaudeHooks:
     def test_remove_hook_handles_missing_settings_file(self, tmp_path, monkeypatch):
         """Should return False if settings file doesn't exist."""
         monkeypatch.setenv("HOME", str(tmp_path))
-
-        from dossier_tools.cli.local import remove_claude_hook
 
         result = remove_claude_hook()
 
